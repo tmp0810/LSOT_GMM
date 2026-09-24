@@ -1,0 +1,2 @@
+# Keep dependencies in one place; both filenames work with pip install -r.
+-r requirements.txt
