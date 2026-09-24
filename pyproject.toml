@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lsot-gmm"
+version = "0.1.0"
+description = "Lifted sliced optimal transport for Gaussian mixtures"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24", "scipy>=1.10", "scikit-learn>=1.3", "POT>=0.9.4",
+  "torch>=2.2", "matplotlib>=3.7", "Pillow>=9.5", "threadpoolctl>=3.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+lsot-color-transfer = "experiments.color_transfer.run:main"
+
+[tool.setuptools]
+py-modules = ["gmmot"]
+
+[tool.setuptools.packages.find]
+include = ["lsot*", "param_proj*", "experiments*"]
+
+[tool.setuptools.package-data]
+"experiments.color_transfer" = ["configs/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

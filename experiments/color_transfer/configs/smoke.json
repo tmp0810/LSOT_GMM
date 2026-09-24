@@ -1,0 +1,23 @@
+{
+  "source": "data/color_transfer/renoir.jpg",
+  "target": "data/color_transfer/gauguin.jpg",
+  "download_reference": true,
+  "output_dir": "results/color_transfer/smoke",
+  "components_source": 10,
+  "components_target": 10,
+  "projection_counts": [4, 8],
+  "seeds": [0],
+  "projection_seed": 20260909,
+  "device": "auto",
+  "dtype": "float64",
+  "max_side": 96,
+  "fit_pixels": 4000,
+  "em_max_iter": 100,
+  "repeats": 2,
+  "warmups": 1,
+  "map_repeats": 1,
+  "batch_size": 4096,
+  "guided_filter": true,
+  "eval_samples": 1024,
+  "eval_projections": 32
+}
