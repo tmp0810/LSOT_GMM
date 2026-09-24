@@ -28,7 +28,7 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
                     map_repeats=1, guided_filter=True, guided_radius=2,
                     eval_samples=64, eval_projections=7, batch_size=31)
     rows = run_experiment(config)
-    assert len(rows) == 3
+    assert len(rows) == 5
     for row in rows:
         assert row["marginal_l1_error"] < 1e-12
         assert row["relative_cost_gap"] >= -1e-10
@@ -41,8 +41,19 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
     metadata = json.loads((folder / "metadata.json").read_text())
     assert metadata["device"] == "cpu"
     weights = np.load(folder / "seed_2" / "gmms.npz")["alpha"]
-    for name in ("MW2", "LSOT-Mix_L3", "LSOT-SMix_L3"):
+    for row in rows:
+        name = row["method"] if row["L"] == 0 else f"{row['method']}_L{row['L']}"
         plan = np.load(folder / "seed_2" / f"{name}_plan.npz")
         np.testing.assert_allclose(np.bincount(plan["rows"], weights=plan["mass"], minlength=3), weights, atol=1e-12)
+        if row["aggregation"] == "min":
+            selection = np.load(folder / "seed_2" / f"{name}_selection.npz")
+            selected = int(selection["projection_index"])
+            assert selected == row["selected_projection"] == np.argmin(selection["projection_costs"])
+            assert len(selection["projection_costs"]) == row["L"]
+            np.testing.assert_allclose(selection["projection_costs"][selected], row["cost_squared"])
+            average = next(r for r in rows if r["method"] == row["method"].removeprefix("min-"))
+            np.testing.assert_allclose(selection["projection_costs"].mean(), average["cost_squared"])
+        else:
+            assert row["selected_projection"] is None
         with Image.open(folder / "seed_2" / f"{name}.png") as image:
             assert image.size == (15, 18)

@@ -5,11 +5,11 @@ import scipy.linalg
 import torch
 
 import gmmot
-from lsot import GMM, BarycentricMap, average_lsot, solve_mw2
+from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, solve_mw2
 from lsot.gaussians import gaussian_pair_costs
 from lsot.maps import gaussian_pair_maps
-from lsot.plans import average_projected_plans, lift_projection, SparsePlan
-from param_proj import sample_projection_bank, project_gaussians
+from lsot.plans import average_projected_plans, lift_projection, minimum_projected_plan, SparsePlan
+from param_proj import ProjectionBank, sample_projection_bank, project_gaussians
 from param_proj.sot_gms import MixSW, SMixW
 from param_proj.sw import one_dimensional_Wasserstein
 
@@ -150,14 +150,102 @@ def test_barycentric_map_matches_original_pixelwise_formula():
     np.testing.assert_allclose(actual, expected, atol=3e-12, rtol=1e-12)
 
 
+@pytest.mark.parametrize("kind", ["Mix", "SMix"])
+@pytest.mark.parametrize("ties", [False, True])
+def test_minimum_matches_exhaustive_dense_lifts_and_scipy_costs(kind, ties):
+    source, target = make_gmm(k=5, seed=10), make_gmm(k=7, seed=15)
+    bank = sample_projection_bank(3, 9, seed=20)
+    x = project_gaussians(source.means, source.covariances, bank, kind)
+    y = project_gaussians(target.means, target.covariances, bank, kind)
+    if ties:
+        # Exercise tied, untied and completely collapsed directions together.
+        x[:, ::2], y[:, ::2] = x[:, ::2].round(), y[:, ::2].round()
+        x[:, 0], y[:, 0] = 0, 0
+        result = minimum_projected_plan(x, y, source, target)
+    else:
+        result = minimum_lsot(source, target, bank, kind)
+    references = np.stack([dense_reference_lift(x[:, ell].numpy(), y[:, ell].numpy(),
+                           source.weights.numpy(), target.weights.numpy()) for ell in range(bank.count)])
+    ground = np.array([[gmmot.GaussianW2(source.means[i].numpy(), target.means[j].numpy(),
+                                       source.covariances[i].numpy(), target.covariances[j].numpy())
+                        for j in range(target.count)] for i in range(source.count)])
+    costs = (references * ground).sum(axis=(1, 2))
+    np.testing.assert_allclose(result.projection_costs.numpy(), costs, atol=2e-12, rtol=1e-12)
+    assert result.projection_index == np.argmin(costs)
+    np.testing.assert_allclose(result.plan.dense().numpy(), references[np.argmin(costs)], atol=3e-15, rtol=0)
+    torch.testing.assert_close(result.cost_squared, result.plan.cost(source, target))
+    assert result.plan.marginal_error(source, target) < 1e-14
+    average = average_projected_plans(x, y, source.weights, target.weights)
+    torch.testing.assert_close(result.projection_costs.mean(), average.cost(source, target))
+    _, optimum = solve_mw2(source, target)
+    assert optimum - 1e-11 <= result.cost_squared.item() <= average.cost(source, target).item() + 1e-11
+
+
+@pytest.mark.parametrize("kind", ["Mix", "SMix"])
+def test_minimum_uses_ground_cost_not_projected_cost(kind):
+    # x-projection: projected cost 0 but lifted ground cost 101.
+    # y-projection: projected cost 1 but lifted ground cost 2.
+    covariances = np.repeat(np.eye(2)[None], 2, axis=0)
+    source = GMM.from_numpy([0.5, 0.5], [[0, 0], [1, 10]], covariances)
+    target = GMM.from_numpy([0.5, 0.5], [[0, 11], [1, 1]], covariances)
+    bank = ProjectionBank(torch.eye(2, dtype=torch.float64),
+                          torch.tensor([[1., 0.], [1., 0.]], dtype=torch.float64),
+                          torch.eye(2, dtype=torch.float64).repeat(2, 1, 1) / np.sqrt(2))
+    x = project_gaussians(source.means, source.covariances, bank, kind)
+    y = project_gaussians(target.means, target.covariances, bank, kind)
+    projected_costs = one_dimensional_Wasserstein(x, y, source.weights, target.weights, 2).ravel()
+    torch.testing.assert_close(projected_costs, torch.tensor([0., 1.], dtype=torch.float64))
+    result = minimum_lsot(source, target, bank, kind)
+    assert result.projection_index == 1 and projected_costs.argmin().item() == 0
+    torch.testing.assert_close(result.projection_costs, torch.tensor([101., 2.], dtype=torch.float64))
+    torch.testing.assert_close(result.plan.dense(), torch.tensor([[0., 0.5], [0.5, 0.]], dtype=torch.float64))
+
+
+@pytest.mark.parametrize("kind", ["Mix", "SMix"])
+def test_minimum_nested_budgets_and_permuted_self_transport(kind):
+    source, target = make_gmm(seed=25), make_gmm(k=7, seed=26)
+    bank = sample_projection_bank(3, 13, seed=27)
+    previous = float("inf")
+    for count in [1, 3, 7, 13]:
+        result = minimum_lsot(source, target, bank.prefix(count), kind)
+        assert result.cost_squared.item() <= previous + 1e-12
+        previous = result.cost_squared.item()
+        if count == 1:
+            torch.testing.assert_close(result.plan.dense(), average_lsot(source, target, bank.prefix(1), kind).dense())
+    order = torch.tensor([4, 2, 0, 1, 3])
+    identical = GMM(source.weights[order], source.means[order], source.covariances[order])
+    result = minimum_lsot(source, identical, bank, kind)
+    torch.testing.assert_close(result.plan.dense(), torch.diag(source.weights)[:, order], atol=2e-15, rtol=0)
+    points = torch.randn(12, 3, dtype=torch.float64)
+    mapped = BarycentricMap.from_plan(source, identical, result.plan).transform(points)
+    torch.testing.assert_close(mapped, points, atol=1e-11, rtol=1e-11)
+
+
+def test_minimum_exact_cost_tie_selects_first_and_preserves_fiber_rule():
+    source, target = make_gmm(k=4, seed=30), make_gmm(k=3, seed=31)
+    x, y = torch.zeros(4, 3, dtype=torch.float64), torch.zeros(3, 3, dtype=torch.float64)
+    result = minimum_projected_plan(x, y, source, target)
+    assert result.projection_index == 0
+    torch.testing.assert_close(result.projection_costs, result.projection_costs[0].expand(3), atol=0, rtol=0)
+    torch.testing.assert_close(result.plan.dense(), torch.outer(source.weights, target.weights))
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
 @pytest.mark.parametrize("kind", ["Mix", "SMix"])
-def test_cuda_matches_cpu(kind):
+@pytest.mark.parametrize("aggregation", ["avg", "min"])
+def test_cuda_matches_cpu(kind, aggregation):
     cpu_s, cpu_t = make_gmm(seed=12), make_gmm(k=7, seed=13)
     gpu_s, gpu_t = make_gmm(seed=12, device="cuda"), make_gmm(k=7, seed=13, device="cuda")
     bank = sample_projection_bank(3, 9, seed=17)
-    cpu_plan = average_lsot(cpu_s, cpu_t, bank, kind)
-    gpu_plan = average_lsot(gpu_s, gpu_t, bank.to(device="cuda"), kind)
+    if aggregation == "avg":
+        cpu_plan = average_lsot(cpu_s, cpu_t, bank, kind)
+        gpu_plan = average_lsot(gpu_s, gpu_t, bank.to(device="cuda"), kind)
+    else:
+        cpu_result = minimum_lsot(cpu_s, cpu_t, bank, kind)
+        gpu_result = minimum_lsot(gpu_s, gpu_t, bank.to(device="cuda"), kind)
+        assert cpu_result.projection_index == gpu_result.projection_index
+        torch.testing.assert_close(cpu_result.projection_costs, gpu_result.projection_costs.cpu(), atol=1e-11, rtol=1e-11)
+        cpu_plan, gpu_plan = cpu_result.plan, gpu_result.plan
     torch.testing.assert_close(cpu_plan.dense(), gpu_plan.dense().cpu(), atol=1e-12, rtol=1e-12)
     points = torch.randn(10, 3, dtype=torch.float64)
     a = BarycentricMap.from_plan(cpu_s, cpu_t, cpu_plan).transform(points)

@@ -1,7 +1,8 @@
 # LSOT for Gaussian mixture models
 
-Averaged **LSOT-Mix** and **LSOT-SMix**, compared with the original **MW2**
-baseline on color transfer. The experiment follows the RGB/GMM/Tmean setting
+Averaged **LSOT-Mix / LSOT-SMix** and **min-LSOT-Mix / min-LSOT-SMix**,
+compared with the original **MW2** baseline on color transfer.
+The experiment follows the RGB/GMM/Tmean setting
 of [Delon and Desolneux](https://arxiv.org/abs/1907.05254) and their
 [reference notebook](https://github.com/judelo/gmmot/blob/master/python/GMM_OT_color_transfer.ipynb).
 
@@ -31,6 +32,10 @@ for EM, full covariances, K0=K1=10, kmeans initialization, and n_init=1.
 EM uses scikit-learn's standard max_iter=100, tol=1e-3, reg_covar=1e-6.
 Fixed random states are added for reproducibility. There is no retraining
 of the GMMs for different methods or projection budgets.
+
+Both configurations run MW2, averaged LSOT and minimum LSOT by default.
+For minimum LSOT plus MW2 only, append `--aggregations min`; to reproduce
+the original averaged comparison, append `--aggregations avg`.
 
 To use your own images, change sizes, or repeat data seeds:
 
@@ -88,6 +93,36 @@ The averaged plan and its true lifted cost are
 
 $$P_L=L^{-1}\sum_{\ell=1}^L\bar P^{s_\ell},\qquad \widehat{\mathrm{LSOT}}_L^2=\sum_{ij}(P_L)_{ij}c_{ij}.$$
 
+Minimum LSOT chooses one of these same lifted plans using its **true Gaussian
+ground cost**:
+
+$$C_\ell=\sum_{ij}\bar P^{s_\ell}_{ij}c_{ij},\qquad \ell^\star\in\operatorname*{arg\,min}_{1\leq\ell\leq L}C_\ell,\qquad P_{\min,L}=\bar P^{s_{\ell^\star}}.$$
+
+Selection is global for the GMM pair, before applying the map to pixels. It
+does not minimize the scalar projected distance and does not average the
+candidate plans. This finite search approximates the theoretical infimum;
+it does not optimize over every possible direction. Avg and min use identical
+prefixes of the same bank, with unchanged Mix/SMix projection formulas.
+For that bank, up to numerical roundoff,
+
+$$MW_2^2\leq C_{\ell^\star}\leq L^{-1}\sum_{\ell=1}^L C_\ell.$$
+
+Increasing a prefix budget cannot increase the minimum ground cost. This
+does not guarantee monotonic improvement of the output image's color score.
+The code evaluates each distinct transported Gaussian pair's cost once and
+accumulates costs per projection, without forming a dense cost matrix or an
+`L x K0 x K1` tensor. Exact cost ties select the first bank index.
+
+Python API (the result also includes the full vector of candidate costs):
+
+```python
+from lsot import minimum_lsot
+
+result = minimum_lsot(source_gmm, target_gmm, bank, kind="Mix")
+plan = result.plan
+print(result.cost_squared.item(), result.projection_index)  # zero-based index
+```
+
 The original `MixSW`/`SMixW` function signatures remain usable. They still
 return **projected** distances, not LSOT. The refactor exposes their scalar
 projections and adds optional `bank`/`seed` keyword arguments. Matrix logs
@@ -108,7 +143,7 @@ This is a barycentric assignment, not a guarantee that `T_P#mu = nu`.
 The implementation first collapses the pair maps into one affine map per
 source component and then processes pixels in batches. It does not allocate
 the reference notebook's `K0 x K1 x 3 x Npixels` tensor. This mathematically
-equivalent implementation is shared by MW2, LSOT-Mix and LSOT-SMix.
+equivalent implementation is shared by MW2 and all averaged/minimum LSOT variants.
 
 Both the unfiltered output and the reference's optional guided-filter output
 are saved. Filtering uses the **unclipped** displacement:
@@ -130,6 +165,8 @@ Default precision is float64. Install a CUDA-enabled PyTorch build to use GPU.
   LSOT evaluates true Gaussian costs only on transported component pairs.
 - **Transport runtime** includes parameter projection, sorting/lifting and
   true cost evaluation for LSOT; dense cost assembly and LP for MW2.
+  Minimum LSOT includes constructing and scoring **all** L candidates and
+  selecting the winner. It does not reuse work from the timed average run.
 - **Map setup/application** use the same code for all methods. Pixel output
   transfer to CPU is included in map application. CUDA timings synchronize
   before and after calls. Each stage has warmups and recorded repetitions.
@@ -158,11 +195,17 @@ Each run writes the following under its configured output directory:
 | `seed_N/projection_bank.npz` | theta, psi and Mix matrices for the largest L |
 | `seed_N/evaluation_bank.npz` | Independent RGB evaluation directions and sampled pixel indices |
 | `seed_N/*_plan.npz` | Sparse rows, cols, mass, shape; no forced dense LSOT plan |
+| `seed_N/min-LSOT-*_selection.npz` | Zero-based selected index and all L true Gaussian costs |
 | `seed_N/*.png` | Individual transferred images and comparison grids |
 | `seed_N/timings.json` | Individual timing repetitions |
 
 `save_raw=true` also writes unfiltered, unclipped float output arrays.
+Existing averaged filenames remain `LSOT-Mix_L100`, `LSOT-SMix_L100`, etc.;
+minimum results use `min-LSOT-Mix_L100`, `min-LSOT-SMix_L100`, etc.
 
+- `aggregation`: `avg` or `min`, empty for MW2.
+- `selected_projection`: zero-based index into the saved shared bank, only
+  for minimum LSOT. The selection archive stores the costs in bank order.
 - `cost_squared`: `sum(P_ij * c_ij)`, the unregularized Gaussian transport cost.
 - `relative_cost_gap`: `(cost_squared - mw2_cost_squared) / mw2_cost_squared`;
   undefined/empty for effectively zero reference cost.
@@ -189,7 +232,7 @@ method or projection seed based on observed performance.
 | `gmmot.py` | Unchanged MW2 reference routines |
 | `param_proj/` | Original projected distances and reusable Mix/SMix banks |
 | `lsot/gaussians.py` | Validated GMMs and sparse-pair Gaussian costs |
-| `lsot/plans.py` | Monotone OT, proportional lifting, averaging, MW2 adapter |
+| `lsot/plans.py` | Monotone OT, proportional lifting, average/min aggregation, MW2 adapter |
 | `lsot/maps.py` | Gaussian pair maps and posterior-weighted Tmean |
 | `experiments/color_transfer/` | Images, EM, experiment, evaluation, configs |
 | `notebooks/color_transfer.ipynb` | Runnable Colab/local walkthrough |
@@ -203,7 +246,11 @@ python -m pytest -q
 Tests compare projections to independent SciPy formulas, lifts to a literal
 dense fiber construction (unequal weights/counts and exact ties), costs/maps
 to `gmmot.py`, averaged costs to per-projection costs, permuted self-transport
-to identity, and Tmean to the original pixelwise formula. End-to-end tests
+to identity, and Tmean to the original pixelwise formula. Minimum LSOT is
+checked against exhaustive dense lifts and SciPy ground costs, including
+collisions, exact cost ties, and a case where projected-cost selection would
+choose the wrong plan. Tests also check the MW2/min/avg cost bounds and
+nonincreasing minimum cost for nested budgets. End-to-end tests
 cover PNG normalization and images with different shapes. CUDA equivalence
 tests run only when a CUDA device is available.
 

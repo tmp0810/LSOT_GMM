@@ -86,30 +86,43 @@ def lift_projection(a_values, b_values, a, b):
     return SparsePlan.from_entries(torch.cat(rows), torch.cat(cols), torch.cat(values), (len(a), len(b)))
 
 
-def average_projected_plans(x, y, a, b):
-    """Average L lifts from locations (K0,L)/(K1,L), preserving exact ties."""
+def _projected_plan_entries(x, y, a, b):
+    """Unscaled entries of all lifts, tagged by their projection index.
+
+    Both aggregations use this same construction. Keeping entries sparse
+    avoids allocating an L x K0 x K1 tensor.
+    """
     if x.ndim != 2 or y.ndim != 2 or x.shape[1] != y.shape[1] or x.shape[1] == 0:
         raise ValueError("expected projected locations (K0,L) and (K1,L), L>0")
+    if x.shape[0] != len(a) or y.shape[0] != len(b):
+        raise ValueError("projected locations must match the component weights")
     if not bool(torch.isfinite(x).all() and torch.isfinite(y).all()):
         raise ValueError("projected locations must be finite")
-    count = x.shape[1]
     xs, ix = torch.sort(x.T, dim=1, stable=True)
     ys, iy = torch.sort(y.T, dim=1, stable=True)
     ties = (xs[:, 1:] == xs[:, :-1]).any(1) | (ys[:, 1:] == ys[:, :-1]).any(1)
-    rows, cols, values = [], [], []
+    directions, rows, cols, values = [], [], [], []
     good = ~ties
     if bool(good.any()):
         i, j, mass = _monotone_entries(a[ix[good]], b[iy[good]])
         keep = mass > 0
+        directions.append(torch.where(good)[0][:, None].expand_as(mass)[keep])
         rows.append(torch.gather(ix[good], 1, i)[keep])
         cols.append(torch.gather(iy[good], 1, j)[keep])
-        values.append(mass[keep] / count)
+        values.append(mass[keep])
     for ell in torch.where(ties)[0].tolist():
         plan = lift_projection(x[:, ell], y[:, ell], a, b)
+        directions.append(torch.full_like(plan.rows, ell))
         rows.append(plan.rows)
         cols.append(plan.cols)
-        values.append(plan.mass / count)
-    return SparsePlan.from_entries(torch.cat(rows), torch.cat(cols), torch.cat(values), (len(a), len(b)))
+        values.append(plan.mass)
+    return tuple(torch.cat(parts) for parts in (directions, rows, cols, values))
+
+
+def average_projected_plans(x, y, a, b):
+    """Average L lifts from locations (K0,L)/(K1,L), preserving exact ties."""
+    _, rows, cols, mass = _projected_plan_entries(x, y, a, b)
+    return SparsePlan.from_entries(rows, cols, mass / x.shape[1], (len(a), len(b)))
 
 
 def average_lsot(source, target, bank, kind):
@@ -117,6 +130,47 @@ def average_lsot(source, target, bank, kind):
     x = project_gaussians(source.means, source.covariances, bank, kind)
     y = project_gaussians(target.means, target.covariances, bank, kind)
     return average_projected_plans(x, y, source.weights, target.weights)
+
+
+@dataclass(frozen=True)
+class MinimumLSOTResult:
+    """Best lift in a finite bank, selected by its true Gaussian ground cost.
+
+    projection_index is zero-based; exact cost ties choose the first index.
+    Costs are squared distances, not projected costs or their square roots.
+    """
+    plan: SparsePlan
+    cost_squared: torch.Tensor
+    projection_index: int
+    projection_costs: torch.Tensor
+
+
+def minimum_projected_plan(x, y, source, target):
+    """Select the lowest-cost lift from precomputed scalar projections.
+
+    Each transported component pair's Gaussian W2-squared cost is evaluated
+    once, even when the pair occurs in several candidate plans. Selection
+    uses sum_ij P^ell_ij c_ij, never the one-dimensional projected OT cost.
+    """
+    directions, rows, cols, mass = _projected_plan_entries(x, y, source.weights, target.weights)
+    pairs, inverse = torch.unique(rows * target.count + cols, return_inverse=True)
+    pair_costs = gaussian_pair_costs(source, target, pairs // target.count, pairs % target.count)
+    costs = mass.new_zeros(x.shape[1]).scatter_add_(0, directions, mass * pair_costs[inverse])
+    selected = int(torch.argmin(costs).item())
+    keep = directions == selected
+    plan = SparsePlan.from_entries(rows[keep], cols[keep], mass[keep], (source.count, target.count))
+    return MinimumLSOTResult(plan, costs[selected], selected, costs)
+
+
+def minimum_lsot(source, target, bank, kind):
+    """Return the best single lift over the supplied finite projection bank.
+
+    This approximates the infimum over projections by a finite search. One
+    projection is selected for the entire GMM pair, before pixel mapping.
+    """
+    x = project_gaussians(source.means, source.covariances, bank, kind)
+    y = project_gaussians(target.means, target.covariances, bank, kind)
+    return minimum_projected_plan(x, y, source, target)
 
 
 def solve_mw2(source, target):

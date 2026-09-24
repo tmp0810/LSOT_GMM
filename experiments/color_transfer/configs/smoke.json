@@ -6,6 +6,7 @@
   "components_source": 10,
   "components_target": 10,
   "projection_counts": [4, 8],
+  "aggregations": ["avg", "min"],
   "seeds": [0],
   "projection_seed": 20260909,
   "device": "auto",

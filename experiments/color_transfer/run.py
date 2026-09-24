@@ -1,4 +1,4 @@
-"""Compare preserved MW2 with averaged LSOT-Mix/SMix color transfer.
+"""Compare preserved MW2 with averaged and minimum LSOT-Mix/SMix color transfer.
 
 python -m experiments.color_transfer.run --config experiments/color_transfer/configs/smoke.json
 """
@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from threadpoolctl import threadpool_limits
 
-from lsot import GMM, BarycentricMap, average_lsot, solve_mw2
+from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, solve_mw2
 from param_proj import sample_projection_bank
 from .data import download_reference_images, fit_gmm, guided_output, read_rgb, save_rgb
 from .evaluation import ColorEvaluator, benchmark, save_comparison, synchronize, time_summary
@@ -31,6 +31,7 @@ class Config:
     components_source: int = 10
     components_target: int = 10
     projection_counts: list = field(default_factory=lambda: [10, 50, 100])
+    aggregations: list = field(default_factory=lambda: ["avg", "min"])
     seeds: list = field(default_factory=lambda: [0])
     projection_seed: int = 20260909
     device: str = "auto"
@@ -56,6 +57,9 @@ class Config:
     def validate(self):
         if not self.projection_counts or any(n < 1 for n in self.projection_counts):
             raise ValueError("projection_counts must contain positive integers")
+        if (not self.aggregations or len(set(self.aggregations)) != len(self.aggregations)
+                or not set(self.aggregations) <= {"avg", "min"}):
+            raise ValueError("aggregations must contain distinct values from 'avg', 'min'")
         if not self.seeds or len(set(self.seeds)) != len(self.seeds):
             raise ValueError("seeds must be nonempty and distinct")
         if self.dtype not in {"float32", "float64"}:
@@ -106,6 +110,7 @@ def _summarize(rows):
     for (method, count), group in groups.items():
         first = group[0]
         entry = {"method": method, "L": count, "K0": first["K0"], "K1": first["K1"],
+                 "aggregation": first["aggregation"],
                  "device": first["device"], "n_seeds": len(group)}
         for name in metrics:
             values = [r[name] for r in group if r[name] is not None]
@@ -149,11 +154,14 @@ def run_experiment(config):
         "input_sha256": {str(p): hashlib.sha256(Path(p).read_bytes()).hexdigest()
                          for p in (config.source, config.target)},
         "timing": "Wall clock with CUDA synchronization. Transport includes cost evaluation. "
+                  "Minimum LSOT includes constructing and scoring all candidate lifts and selecting the best. "
                   "Banks are sampled before timing and bank sampling is reported separately. "
                   "Pipeline excludes file I/O, plotting and evaluation; includes GMM fitting, "
                   "input transfers, transport, map setup/application and optional guided filtering.",
         "mw2_backend": "Original gmmot.GW2: SciPy and POT CPU; transfers included.",
         "plan_reference": "MW2 component LP, not full distribution-space W2",
+        "minimum_selection": "One lift for the entire GMM pair, minimizing true Gaussian W2-squared "
+                             "cost over the shared finite bank. Zero-based index; first index on exact ties.",
         "color_evaluation": "Root SW2 on clipped float RGB before 8-bit PNG quantization",
     }
     _write_json(output_dir / "metadata.json", metadata)
@@ -189,21 +197,28 @@ def run_experiment(config):
                                 target_indices=evaluator.target_indices, directions=evaluator.directions)
             outputs, guided_outputs, timing_rows = [], [], {}
             reference_plan, reference_cost, reference_output = None, None, None
-            jobs = [("MW2", 0)] + [(kind, count) for count in sorted(set(config.projection_counts))
-                                    for kind in ("Mix", "SMix")]
-            for kind, count in jobs:
-                method = "MW2" if kind == "MW2" else f"LSOT-{kind}"
+            jobs = [("MW2", 0, None)] + [
+                (kind, count, aggregation) for count in sorted(set(config.projection_counts))
+                for aggregation in config.aggregations for kind in ("Mix", "SMix")]
+            for kind, count, aggregation in jobs:
+                method = "MW2" if kind == "MW2" else f"{'min-' if aggregation == 'min' else ''}LSOT-{kind}"
                 name = method if count == 0 else f"{method}_L{count}"
                 if kind == "MW2":
-                    solver = lambda: solve_mw2(source, target)
+                    def solver():
+                        plan, cost = solve_mw2(source, target)
+                        return plan, cost, None
                 else:
                     selected_bank = bank.prefix(count)
 
                     def solver():
+                        if aggregation == "min":
+                            result = minimum_lsot(source, target, selected_bank, kind)
+                            return result.plan, float(result.cost_squared.item()), result
                         plan = average_lsot(source, target, selected_bank, kind)
-                        return plan, float(plan.cost(source, target).item())
+                        return plan, float(plan.cost(source, target).item()), None
 
-                (plan, cost), transport_times = benchmark(solver, device=device, repeats=config.repeats, warmups=config.warmups)
+                (plan, cost, selection), transport_times = benchmark(
+                    solver, device=device, repeats=config.repeats, warmups=config.warmups)
                 marginal_error = plan.marginal_error(source, target)
                 feasibility_tol = 1e-8 if dtype == torch.float64 else 2e-5
                 if marginal_error > feasibility_tol or not np.isfinite(cost):
@@ -232,6 +247,10 @@ def run_experiment(config):
                 if config.save_raw:
                     np.save(folder / f"{name}_raw.npy", mapped)
                 _save_plan(folder / f"{name}_plan.npz", plan)
+                if selection is not None:
+                    np.savez_compressed(folder / f"{name}_selection.npz",
+                                        projection_index=selection.projection_index,
+                                        projection_costs=_numpy(selection.projection_costs))
                 outputs.append((name, mapped))
                 transport_mean, transport_std = time_summary(transport_times)
                 setup_mean, setup_std = time_summary(setup_times)
@@ -239,6 +258,8 @@ def run_experiment(config):
                 row = {
                     "seed": seed, "method": method, "K0": source.count, "K1": target.count,
                     "d": 3, "L": count, "device": str(device), "dtype": config.dtype,
+                    "aggregation": aggregation,
+                    "selected_projection": selection.projection_index if selection is not None else None,
                     "solver_backend": "scipy+POT(cpu)" if kind == "MW2" else "torch",
                     "source_pixels": len(x), "target_pixels": len(y),
                     "fit_source_pixels": count_x, "fit_target_pixels": count_y,
@@ -283,12 +304,14 @@ def main():
     parser.add_argument("--device", help="auto, cpu, cuda or cuda:0")
     parser.add_argument("--components", type=int, nargs="+", help="K, or K0 K1")
     parser.add_argument("--projections", type=int, nargs="+")
+    parser.add_argument("--aggregations", choices=["avg", "min"], nargs="+",
+                        help="LSOT aggregation(s); defaults to both avg and min")
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--max-side", type=int)
     parser.add_argument("--fit-pixels", type=int)
     args = parser.parse_args()
     values = json.loads(args.config.read_text(encoding="utf-8"))
-    for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels"):
+    for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels", "aggregations"):
         value = getattr(args, key)
         if value is not None:
             values[key] = value
