@@ -133,11 +133,11 @@ def _prepare_banks(config, seed, device, dtype, folder):
 def _summarize(rows):
     groups = {}
     for row in rows:
-        groups.setdefault((row["method"], row["L"]), []).append(row)
+        groups.setdefault((row["K0"], row["K1"], row["method"], row["L"]), []).append(row)
     summary = []
     metrics = ["transport_ms_mean", "map_setup_ms_mean", "map_apply_ms_mean", "pipeline_ms",
                "cost_squared", "relative_cost_gap", "plan_rmse", "color_sw2", "guided_color_sw2"]
-    for (method, count), group in groups.items():
+    for (_, _, method, count), group in groups.items():
         first = group[0]
         entry = {"method": method, "L": count, "K0": first["K0"], "K1": first["K1"],
                  "projection_family": first["projection_family"],
@@ -326,8 +326,9 @@ def run_experiment(config):
     return all_rows
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_parser(description=__doc__):
+    """Common CLI options for a single K setting and a component-count sweep."""
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--config", type=Path, default=Path(__file__).parent / "configs" / "mw2_reference.json")
     parser.add_argument("--source")
     parser.add_argument("--target")
@@ -338,11 +339,15 @@ def main():
     parser.add_argument("--projection-kinds", choices=PROJECTION_KINDS, nargs="+",
                         help="projection families; defaults to Mix SMix B B1D")
     parser.add_argument("--aggregations", choices=["avg", "min"], nargs="+",
-                        help="LSOT aggregation(s); defaults to both avg and min")
+                        help="LSOT aggregation(s), overriding the config")
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--max-side", type=int)
     parser.add_argument("--fit-pixels", type=int)
-    args = parser.parse_args()
+    return parser
+
+
+def config_from_arguments(args):
+    """Load the JSON setting, then apply explicitly provided CLI overrides."""
     values = json.loads(args.config.read_text(encoding="utf-8"))
     for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels",
                 "aggregations", "projection_kinds"):
@@ -351,12 +356,16 @@ def main():
             values[key] = value
     if args.components:
         if len(args.components) not in {1, 2}:
-            parser.error("--components expects K or K0 K1")
+            raise ValueError("--components expects K or K0 K1")
         values["components_source"] = args.components[0]
         values["components_target"] = args.components[-1]
     if args.projections:
         values["projection_counts"] = args.projections
-    run_experiment(Config(**values))
+    return Config(**values)
+
+
+def main():
+    run_experiment(config_from_arguments(build_parser().parse_args()))
 
 
 if __name__ == "__main__":

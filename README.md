@@ -34,8 +34,8 @@ EM uses scikit-learn's standard max_iter=100, tol=1e-3, reg_covar=1e-6.
 Fixed random states are added for reproducibility. There is no retraining
 of the GMMs for different methods or projection budgets.
 
-Both configurations run MW2 and all four projection families, with averaged
-and minimum LSOT by default (25 method/budget combinations in the full run).
+Both configurations include MW2 and all four projection families. The current
+reference JSON uses minimum LSOT at L=500; the smoke JSON uses avg/min at L=4,8.
 For minimum LSOT plus MW2 only, append `--aggregations min`; to reproduce
 the original averaged parameter comparison, append
 `--aggregations avg --projection-kinds Mix SMix`.
@@ -62,6 +62,51 @@ approximations; omit them to keep the full image setting.
 In Colab, `%cd /content/LSOT_GMM` before installing/running shell commands.
 Unlike `!cd`, `%cd` persists across cells. The provided notebook handles
 cloning and the working directory automatically.
+
+## Sweep the number of Gaussian components
+
+To run K0=K1 in **10, 20, 50, 100, 200** with the current reference config:
+
+```bash
+python -m experiments.color_transfer.sweep --config experiments/color_transfer/configs/mw2_reference.json --component-counts 10 20 50 100 200 --output-dir results/color_transfer/k_sweep
+```
+
+The five counts above are also the default when `--component-counts` is
+omitted. This command inherits the config's projection counts, families,
+aggregations, images, seeds and evaluation settings. It supports the same
+overrides as the single run, for example `--device cuda:0 --projections 500
+--aggregations min`. Use `--component-counts` instead of `--components` here.
+The existing single-K command continues to work.
+
+Each K fits one shared source/target GMM pair per data seed; all methods
+reuse it. Projection banks and RGB evaluation samples/directions depend
+on the same fixed seeds and budgets, so they remain identical across K.
+GMMs are refitted for each K and are not nested. Runs execute sequentially.
+
+The command prints three comparison tables and writes:
+
+| File in the sweep output directory | Contents |
+| --- | --- |
+| `comparison.tsv` | Compact combined table: K, method, L, runtime, cost, color SW2, plan RMSE |
+| `runtime_ms.tsv` | Transport runtime in ms, rows K, columns method/L |
+| `cost_squared.tsv` | True Gaussian transport cost, same layout |
+| `color_sw2.tsv` | Output-versus-target color SW2, same layout |
+| `guided_color_sw2.tsv` | Color SW2 after guided filtering; blank if disabled |
+| `plan_rmse.tsv` | Component-plan RMSE against MW2, same layout |
+| `paper_results.tsv` | Detailed seed means/stds, grouped by K, method and L |
+| `metrics.csv` | All individual-seed rows, including timing statistics |
+| `sweep_config.json` | Settings, requested K values and completed K values |
+| `K_10/`, `K_20/`, ... | All usual images, sparse plans, banks, GMMs and logs |
+
+TSV files can be pasted/imported directly into Google Sheets. Wide tables
+contain numeric **means across data seeds**; exact standard deviations and
+seed counts are in `paper_results.tsv`. Columns include L, so multiple
+projection budgets never get mixed together. MW2 appears once per K.
+Runtime here excludes GMM fitting and pixel mapping, just as `transport`
+in the single-run output; full pipeline timings remain in the detailed files.
+Tables are saved after every completed K so earlier results survive a later
+failure. This does not automatically resume a failed sweep. Use a new output
+directory for a different setting to avoid mixing previous images with new ones.
 
 ## What stays the same, and what changes
 

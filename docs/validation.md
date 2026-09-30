@@ -3,6 +3,23 @@
 Validated on CPU with float64. CUDA is supported by the implementation,
 but no CUDA device was available for this validation.
 
+## Component-count sweep (2026-09-30)
+
+- Full test suite: **46 passed, 9 skipped** (CUDA unavailable).
+- Offline sweep at two K values, two data seeds and all eight LSOT variants:
+  verifies grouped means, output table columns and exact equality of saved
+  projection/evaluation banks across K. Multiple projection budgets are kept
+  in separate columns; neither K nor L is pooled during aggregation.
+- CLI smoke sweep completed K=10,20,50,100,200, MW2 plus min-Mix/SMix/B/B1D,
+  L=8, CPU float64, seed 0. For this integration check only, the reference
+  images were resized to maximum side 48 with a fitting budget of 1,500 pixels.
+  All 25 configurations completed and the per-K output directories and root
+  comparison tables were generated. This is not the full-resolution GPU
+  benchmark; its timing and quality values should not be used as paper results.
+- The existing reference JSON and its user-selected L/aggregation/seed values
+  are preserved. The sweep command inherits these, overriding only K0=K1 and
+  per-K output directories unless additional CLI overrides are supplied.
+
 ## Large CUDA eigensolver batch fix (2026-09-30)
 
 A Colab run with K=100 and L=500 reported CUSOLVER_STATUS_INVALID_VALUE
