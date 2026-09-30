@@ -5,7 +5,7 @@
   "output_dir": "results/color_transfer/mw2_reference",
   "components_source": 10,
   "components_target": 10,
-  "projection_counts": [50, 100, 200, 500, 1000],
+  "projection_counts": [10, 20, 50, 100, 200,300, 500,700, 1000],
   "projection_kinds": ["Mix", "SMix", "B", "B1D"],
   "aggregations": ["min"],
   "seeds": [0],
@@ -26,7 +26,7 @@
   "guided_radius": 10,
   "guided_epsilon": 0.0001,
   "eval_samples": 4096,
-  "eval_projections": 128,
+  "eval_projections": 500,
   "eval_seed": 42,
   "save_raw": false
 }
