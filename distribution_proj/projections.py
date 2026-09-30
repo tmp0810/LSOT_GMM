@@ -116,6 +116,8 @@ def _check_inputs(means, covariances, direction, tensors):
         raise ValueError("projections require float32 or float64")
     if any(t.device != means.device or t.dtype != means.dtype for t in (covariances, *tensors)):
         raise ValueError("GMM and projection bank must share device and dtype")
+    if any(not bool(torch.isfinite(t).all()) for t in (means, covariances, *tensors)):
+        raise ValueError("GMM and projection bank must contain only finite values")
 
 
 def project_busemann(means, covariances, bank, *, pair_batch_size=65536):
@@ -127,7 +129,7 @@ def project_busemann(means, covariances, bank, *, pair_batch_size=65536):
     C=S^2. The matrices Sigma^(1/2) S^2 Sigma^(1/2) and S Sigma S have
     the same eigenvalues, so their square-root traces coincide. We avoid
     reconstructing ray endpoints and subtracting nearly equal matrices.
-    Chunking bounds temporary matrix storage by pair_batch_size, rather
+    Chunking bounds temporary matrix storage by min(pair_batch_size,4096), rather
     than allocating all K*L matrices at once. No component-pair costs here.
     """
     if not isinstance(bank, BusemannBank):
@@ -138,6 +140,11 @@ def project_busemann(means, covariances, bank, *, pair_batch_size=65536):
         raise ValueError("expected tangent_matrices (L,d,d)")
     if pair_batch_size < 1:
         raise ValueError("pair_batch_size must be positive")
+    # Large batches of small matrices can fail in CUDA's syevBatched
+    # workspace query (including 50,000 float64 3x3 matrices on Colab).
+    # Cap even explicitly requested larger batches; keep this path on CPU
+    # too so the same batching policy can be tested without a GPU.
+    pair_batch_size = min(pair_batch_size, 4096)
     cross_trace = means.new_empty(len(means) * bank.count)
     for start in range(0, len(cross_trace), pair_batch_size):
         stop = min(start + pair_batch_size, len(cross_trace))

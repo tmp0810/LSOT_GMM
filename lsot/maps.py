@@ -33,6 +33,11 @@ class BarycentricMap:
         """
         if plan.shape != (source.count, target.count):
             raise ValueError("plan shape does not match the GMMs")
+        if pair_batch_size < 1:
+            raise ValueError("pair_batch_size must be positive")
+        # Pair square roots use eigh, subject to the same CUDA batch issue
+        # as B projections and Gaussian cost evaluation.
+        pair_batch_size = min(pair_batch_size, 4096)
         matrices = torch.zeros_like(source.covariances)
         offsets = torch.zeros_like(source.means)
         for start in range(0, plan.nnz, pair_batch_size):

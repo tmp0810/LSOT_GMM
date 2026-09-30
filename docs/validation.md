@@ -3,6 +3,28 @@
 Validated on CPU with float64. CUDA is supported by the implementation,
 but no CUDA device was available for this validation.
 
+## Large CUDA eigensolver batch fix (2026-09-30)
+
+A Colab run with K=100 and L=500 reported CUSOLVER_STATUS_INVALID_VALUE
+inside the B projection's eigvalsh workspace query. The previous 65,536-pair
+budget submitted all 50,000 matrices at once. Large small-matrix batches are
+a known backend compatibility issue (see PyTorch issue #166004); the exact
+threshold depends on the installed CUDA/PyTorch stack.
+
+B projection, Gaussian pair costs and barycentric map setup now cap matrix
+batches at 4,096, including when a larger budget is explicitly requested.
+This changes partitioning only, not projections, candidate plans, precision
+or the mathematical formulas. Nonfinite projection inputs raise an explicit
+ValueError before entering the eigensolver.
+
+Validation: **40 passed, 9 skipped**. A K=100,L=500 regression intercepts
+every eigvalsh call, rejects oversized batches, and verifies the 13 resulting
+batches against an independently partitioned result. A 10,000-pair test checks
+the cost and map paths against closed-form equal-covariance results. Existing
+formula and offline color-transfer tests pass. The corresponding CUDA
+regression is included but skipped here: the original Colab failure cannot
+be reproduced on this CPU-only host, so the GPU fix still needs a Colab rerun.
+
 ## B/B1D integration (2026-09-30)
 
 - Editable installation with `python -m pip install -e '.[test]'`.

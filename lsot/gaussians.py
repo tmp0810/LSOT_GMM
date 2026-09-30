@@ -58,6 +58,10 @@ def symmetric_sqrt(matrix):
 
 def gaussian_pair_costs(source, target, rows, cols, *, batch_size=65536):
     """Evaluate only requested pairs; never allocate a K0 x K1 matrix."""
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    # Bound small-matrix eigvalsh batches for CUDA syevBatched compatibility.
+    batch_size = min(batch_size, 4096)
     roots, _ = covariance_roots(source.covariances)
     costs = source.weights.new_empty(rows.numel())
     for start in range(0, rows.numel(), batch_size):
