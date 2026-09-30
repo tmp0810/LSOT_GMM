@@ -1,4 +1,4 @@
-"""Compare preserved MW2 with averaged and minimum LSOT-Mix/SMix color transfer.
+"""Compare preserved MW2 with averaged/minimum LSOT (Mix, SMix, B, B1D).
 
 python -m experiments.color_transfer.run --config experiments/color_transfer/configs/smoke.json
 """
@@ -17,7 +17,7 @@ import torch
 from threadpoolctl import threadpool_limits
 
 from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, solve_mw2
-from param_proj import sample_projection_bank
+from lsot.projections import PROJECTION_KINDS, sample_projection_bank
 from .data import download_reference_images, fit_gmm, guided_output, read_rgb, save_rgb
 from .evaluation import ColorEvaluator, benchmark, save_comparison, synchronize, time_summary
 
@@ -31,6 +31,7 @@ class Config:
     components_source: int = 10
     components_target: int = 10
     projection_counts: list = field(default_factory=lambda: [10, 50, 100])
+    projection_kinds: list = field(default_factory=lambda: list(PROJECTION_KINDS))
     aggregations: list = field(default_factory=lambda: ["avg", "min"])
     seeds: list = field(default_factory=lambda: [0])
     projection_seed: int = 20260909
@@ -57,6 +58,9 @@ class Config:
     def validate(self):
         if not self.projection_counts or any(n < 1 for n in self.projection_counts):
             raise ValueError("projection_counts must contain positive integers")
+        if (not self.projection_kinds or len(set(self.projection_kinds)) != len(self.projection_kinds)
+                or not set(self.projection_kinds) <= set(PROJECTION_KINDS)):
+            raise ValueError(f"projection_kinds must contain distinct values from {PROJECTION_KINDS}")
         if (not self.aggregations or len(set(self.aggregations)) != len(self.aggregations)
                 or not set(self.aggregations) <= {"avg", "min"}):
             raise ValueError("aggregations must contain distinct values from 'avg', 'min'")
@@ -100,6 +104,32 @@ def _plan_rmse(plan, reference):
     return float(torch.sqrt(difference.square().sum() / (plan.shape[0] * plan.shape[1])).item())
 
 
+def _prepare_banks(config, seed, device, dtype, folder):
+    """Sample once per family; preserve the existing shared Mix/SMix bank.
+
+    Separate local generators keep old parameter banks unchanged when new
+    families are enabled. Each family reuses its bank for both aggregations
+    and all prefix budgets. Only bank preparation is timed here.
+    """
+    banks, times, files = {}, {}, {}
+    groups = {"Mix": "parameter", "SMix": "parameter", "B": "B", "B1D": "B1D"}
+    prepared = {}
+    for kind in config.projection_kinds:
+        group = groups[kind]
+        if group not in prepared:
+            synchronize(device)
+            start = time.perf_counter()
+            bank = sample_projection_bank(3, max(config.projection_counts), kind=kind,
+                                          seed=config.projection_seed + seed, device=device, dtype=dtype)
+            synchronize(device)
+            elapsed = 1000 * (time.perf_counter() - start)
+            filename = "projection_bank.npz" if group == "parameter" else f"projection_bank_{group}.npz"
+            np.savez_compressed(folder / filename, **{k: _numpy(v) for k, v in vars(bank).items()})
+            prepared[group] = bank, elapsed, filename
+        banks[kind], times[kind], files[kind] = prepared[group]
+    return banks, times, files
+
+
 def _summarize(rows):
     groups = {}
     for row in rows:
@@ -110,6 +140,7 @@ def _summarize(rows):
     for (method, count), group in groups.items():
         first = group[0]
         entry = {"method": method, "L": count, "K0": first["K0"], "K1": first["K1"],
+                 "projection_family": first["projection_family"],
                  "aggregation": first["aggregation"],
                  "device": first["device"], "n_seeds": len(group)}
         for name in metrics:
@@ -162,6 +193,10 @@ def run_experiment(config):
         "plan_reference": "MW2 component LP, not full distribution-space W2",
         "minimum_selection": "One lift for the entire GMM pair, minimizing true Gaussian W2-squared "
                              "cost over the shared finite bank. Zero-based index; first index on exact ties.",
+        "projection_families": config.projection_kinds,
+        "distribution_projections": "Bonet et al. Gaussian ray laws: B at base N(0,I_3), "
+                                    "B1D at base N(0,1), with full theta.T Sigma theta. "
+                                    "Upstream revision: 5bb8a254f9c340a7a37af14218b7d6b06130e3d0.",
         "color_evaluation": "Root SW2 on clipped float RGB before 8-bit PNG quantization",
     }
     _write_json(output_dir / "metadata.json", metadata)
@@ -184,13 +219,7 @@ def run_experiment(config):
             points = torch.as_tensor(x, dtype=dtype, device=device)
             synchronize(device)
             input_ms = 1000 * (time.perf_counter() - start)
-            start = time.perf_counter()
-            bank = sample_projection_bank(3, max(config.projection_counts), seed=config.projection_seed + seed,
-                                          device=device, dtype=dtype)
-            synchronize(device)
-            bank_ms = 1000 * (time.perf_counter() - start)
-            np.savez_compressed(folder / "projection_bank.npz", theta=_numpy(bank.theta),
-                                psi=_numpy(bank.psi), matrices=_numpy(bank.matrices))
+            banks, bank_times, bank_files = _prepare_banks(config, seed, device, dtype, folder)
             evaluator = ColorEvaluator.create(x, y, samples=config.eval_samples,
                                               projections=config.eval_projections, seed=config.eval_seed + seed)
             np.savez_compressed(folder / "evaluation_bank.npz", source_indices=evaluator.source_indices,
@@ -199,7 +228,7 @@ def run_experiment(config):
             reference_plan, reference_cost, reference_output = None, None, None
             jobs = [("MW2", 0, None)] + [
                 (kind, count, aggregation) for count in sorted(set(config.projection_counts))
-                for aggregation in config.aggregations for kind in ("Mix", "SMix")]
+                for aggregation in config.aggregations for kind in config.projection_kinds]
             for kind, count, aggregation in jobs:
                 method = "MW2" if kind == "MW2" else f"{'min-' if aggregation == 'min' else ''}LSOT-{kind}"
                 name = method if count == 0 else f"{method}_L{count}"
@@ -208,7 +237,7 @@ def run_experiment(config):
                         plan, cost = solve_mw2(source, target)
                         return plan, cost, None
                 else:
-                    selected_bank = bank.prefix(count)
+                    selected_bank = banks[kind].prefix(count)
 
                     def solver():
                         if aggregation == "min":
@@ -259,13 +288,15 @@ def run_experiment(config):
                     "seed": seed, "method": method, "K0": source.count, "K1": target.count,
                     "d": 3, "L": count, "device": str(device), "dtype": config.dtype,
                     "aggregation": aggregation,
+                    "projection_family": kind if kind != "MW2" else None,
+                    "projection_bank": bank_files[kind] if kind != "MW2" else None,
                     "selected_projection": selection.projection_index if selection is not None else None,
                     "solver_backend": "scipy+POT(cpu)" if kind == "MW2" else "torch",
                     "source_pixels": len(x), "target_pixels": len(y),
                     "fit_source_pixels": count_x, "fit_target_pixels": count_y,
                     "em_source_converged": bool(sx.converged_), "em_target_converged": bool(sy.converged_),
                     "fit_ms": fit_x + fit_y, "input_setup_ms": input_ms,
-                    "bank_sampling_ms": bank_ms if kind != "MW2" else 0.0,
+                    "bank_sampling_ms": bank_times[kind] if kind != "MW2" else 0.0,
                     "transport_ms_mean": transport_mean, "transport_ms_std": transport_std,
                     "map_setup_ms_mean": setup_mean, "map_setup_ms_std": setup_std,
                     "map_apply_ms_mean": apply_mean, "map_apply_ms_std": apply_std,
@@ -304,6 +335,8 @@ def main():
     parser.add_argument("--device", help="auto, cpu, cuda or cuda:0")
     parser.add_argument("--components", type=int, nargs="+", help="K, or K0 K1")
     parser.add_argument("--projections", type=int, nargs="+")
+    parser.add_argument("--projection-kinds", choices=PROJECTION_KINDS, nargs="+",
+                        help="projection families; defaults to Mix SMix B B1D")
     parser.add_argument("--aggregations", choices=["avg", "min"], nargs="+",
                         help="LSOT aggregation(s); defaults to both avg and min")
     parser.add_argument("--seeds", type=int, nargs="+")
@@ -311,7 +344,8 @@ def main():
     parser.add_argument("--fit-pixels", type=int)
     args = parser.parse_args()
     values = json.loads(args.config.read_text(encoding="utf-8"))
-    for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels", "aggregations"):
+    for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels",
+                "aggregations", "projection_kinds"):
         value = getattr(args, key)
         if value is not None:
             values[key] = value

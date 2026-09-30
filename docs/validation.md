@@ -3,7 +3,41 @@
 Validated on CPU with float64. CUDA is supported by the implementation,
 but no CUDA device was available for this validation.
 
-## Checks performed
+## B/B1D integration (2026-09-30)
+
+- Editable installation with `python -m pip install -e '.[test]'`.
+- `python -m pytest -q`: **37 passed, 8 skipped** (all skips require CUDA).
+- B matches the general endpoint Busemann formula computed independently
+  with SciPy matrix square roots, including noncommuting covariances.
+  Tests check zero at the base, value `-t` along its unit-speed ray, and
+  equivalence of chunked/un-chunked evaluation.
+- B1D matches the mean/standard-deviation formula with full covariance.
+  An explicit off-diagonal regression distinguishes `theta.T Sigma theta`
+  from the upstream diagonal-only contraction.
+- Both new families pass weighted, unequal-component-count, exact-tie,
+  self-transport, independent dense lift/cost, minimum-selection and nested
+  budget checks. Single-Gaussian/single-projection and float32 checks pass.
+- Offline image test completes MW2 and all eight LSOT variants. Every LSOT
+  plan is reconstructed from its saved bank; Mix/SMix seeded tensors are
+  unchanged when B/B1D are enabled.
+- `python -m experiments.color_transfer.run --config experiments/color_transfer/configs/smoke.json --device cpu`:
+  all **17** method/budget configurations complete on Renoir -> Gauguin,
+  K0=K1=10, L=4,8, maximum image side 96, at most 4,000 fitting pixels.
+  Maximum marginal L1 error: **4.38e-16**. Selection archives agree with
+  the argmin, and their mean candidate costs agree with averaged costs.
+- Notebook code cells parse successfully. Full-resolution B/B1D color
+  transfer was not benchmarked in this validation; the smoke run verifies
+  integration, not quality or runtime superiority.
+
+This check used CPU float64 with Python 3.12, PyTorch 2.14.0+cpu, POT
+0.9.7.post1, SciPy 1.17.0, and scikit-learn 1.8.0. CUDA tests cover all four
+families but were not executed on this machine. No additional runtime
+dependencies were introduced by B/B1D.
+
+## Previous Mix/SMix validation
+
+The results below were recorded before adding B/B1D; they are retained as
+the previous implementation's reference, not a new run of all four families.
 
 - Editable installation with `python -m pip install -e '.[test]'`.
 - `python -m pytest -q`: **20 passed, 4 skipped**. All skipped tests require CUDA.

@@ -8,6 +8,7 @@ import gmmot
 from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, solve_mw2
 from lsot.gaussians import gaussian_pair_costs
 from lsot.maps import gaussian_pair_maps
+from lsot.projections import sample_projection_bank as sample_lsot_bank, project_gaussians as project_lsot_gaussians
 from lsot.plans import average_projected_plans, lift_projection, minimum_projected_plan, SparsePlan
 from param_proj import ProjectionBank, sample_projection_bank, project_gaussians
 from param_proj.sot_gms import MixSW, SMixW
@@ -150,13 +151,13 @@ def test_barycentric_map_matches_original_pixelwise_formula():
     np.testing.assert_allclose(actual, expected, atol=3e-12, rtol=1e-12)
 
 
-@pytest.mark.parametrize("kind", ["Mix", "SMix"])
+@pytest.mark.parametrize("kind", ["Mix", "SMix", "B", "B1D"])
 @pytest.mark.parametrize("ties", [False, True])
 def test_minimum_matches_exhaustive_dense_lifts_and_scipy_costs(kind, ties):
     source, target = make_gmm(k=5, seed=10), make_gmm(k=7, seed=15)
-    bank = sample_projection_bank(3, 9, seed=20)
-    x = project_gaussians(source.means, source.covariances, bank, kind)
-    y = project_gaussians(target.means, target.covariances, bank, kind)
+    bank = sample_lsot_bank(3, 9, kind=kind, seed=20)
+    x = project_lsot_gaussians(source.means, source.covariances, bank, kind)
+    y = project_lsot_gaussians(target.means, target.covariances, bank, kind)
     if ties:
         # Exercise tied, untied and completely collapsed directions together.
         x[:, ::2], y[:, ::2] = x[:, ::2].round(), y[:, ::2].round()
@@ -201,10 +202,10 @@ def test_minimum_uses_ground_cost_not_projected_cost(kind):
     torch.testing.assert_close(result.plan.dense(), torch.tensor([[0., 0.5], [0.5, 0.]], dtype=torch.float64))
 
 
-@pytest.mark.parametrize("kind", ["Mix", "SMix"])
+@pytest.mark.parametrize("kind", ["Mix", "SMix", "B", "B1D"])
 def test_minimum_nested_budgets_and_permuted_self_transport(kind):
     source, target = make_gmm(seed=25), make_gmm(k=7, seed=26)
-    bank = sample_projection_bank(3, 13, seed=27)
+    bank = sample_lsot_bank(3, 13, kind=kind, seed=27)
     previous = float("inf")
     for count in [1, 3, 7, 13]:
         result = minimum_lsot(source, target, bank.prefix(count), kind)
@@ -231,12 +232,12 @@ def test_minimum_exact_cost_tie_selects_first_and_preserves_fiber_rule():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
-@pytest.mark.parametrize("kind", ["Mix", "SMix"])
+@pytest.mark.parametrize("kind", ["Mix", "SMix", "B", "B1D"])
 @pytest.mark.parametrize("aggregation", ["avg", "min"])
 def test_cuda_matches_cpu(kind, aggregation):
     cpu_s, cpu_t = make_gmm(seed=12), make_gmm(k=7, seed=13)
     gpu_s, gpu_t = make_gmm(seed=12, device="cuda"), make_gmm(k=7, seed=13, device="cuda")
-    bank = sample_projection_bank(3, 9, seed=17)
+    bank = sample_lsot_bank(3, 9, kind=kind, seed=17)
     if aggregation == "avg":
         cpu_plan = average_lsot(cpu_s, cpu_t, bank, kind)
         gpu_plan = average_lsot(gpu_s, gpu_t, bank.to(device="cuda"), kind)

@@ -22,7 +22,7 @@ lsot-color-transfer = "experiments.color_transfer.run:main"
 py-modules = ["gmmot"]
 
 [tool.setuptools.packages.find]
-include = ["lsot*", "param_proj*", "experiments*"]
+include = ["lsot*", "param_proj*", "distribution_proj*", "experiments*"]
 
 [tool.setuptools.package-data]
 "experiments.color_transfer" = ["configs/*.json"]

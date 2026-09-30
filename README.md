@@ -1,7 +1,8 @@
 # LSOT for Gaussian mixture models
 
-Averaged **LSOT-Mix / LSOT-SMix** and **min-LSOT-Mix / min-LSOT-SMix**,
-compared with the original **MW2** baseline on color transfer.
+Averaged and minimum **LSOT** with four projection families:
+**Mix, SMix, B (Busemann), B1D (Busemann 1D)**, compared with the original
+**MW2** baseline on color transfer.
 The experiment follows the RGB/GMM/Tmean setting
 of [Delon and Desolneux](https://arxiv.org/abs/1907.05254) and their
 [reference notebook](https://github.com/judelo/gmmot/blob/master/python/GMM_OT_color_transfer.ipynb).
@@ -33,9 +34,20 @@ EM uses scikit-learn's standard max_iter=100, tol=1e-3, reg_covar=1e-6.
 Fixed random states are added for reproducibility. There is no retraining
 of the GMMs for different methods or projection budgets.
 
-Both configurations run MW2, averaged LSOT and minimum LSOT by default.
+Both configurations run MW2 and all four projection families, with averaged
+and minimum LSOT by default (25 method/budget combinations in the full run).
 For minimum LSOT plus MW2 only, append `--aggregations min`; to reproduce
-the original averaged comparison, append `--aggregations avg`.
+the original averaged parameter comparison, append
+`--aggregations avg --projection-kinds Mix SMix`.
+
+Run only the two new distribution-space families plus MW2:
+
+```bash
+python -m experiments.color_transfer.run --config experiments/color_transfer/configs/mw2_reference.json --projection-kinds B B1D
+```
+
+The corresponding JSON option is `"projection_kinds": ["Mix", "SMix", "B", "B1D"]`.
+Older config files without this option also default to all four families.
 
 To use your own images, change sizes, or repeat data seeds:
 
@@ -62,7 +74,8 @@ All methods use the same Gaussian W2-squared ground cost:
 $$c_{ij}=\|m_i-n_j\|^2+\mathrm{tr}\left(\Sigma_i+\Lambda_j-2(\Sigma_i^{1/2}\Lambda_j\Sigma_i^{1/2})^{1/2}\right).$$
 
 MW2 minimizes `sum(P * C)` over component couplings. LSOT replaces this
-component plan by a lifted plan from each scalar parameter projection:
+component plan by a lifted plan from each scalar Gaussian projection. The
+parameter-space families are:
 
 $$p_s^{\rm Mix}(m,\Sigma)=\psi_1\theta^\top m+\psi_2\langle A,\log\Sigma\rangle_F,$$
 $$p_s^{\rm SMix}(m,\Sigma)=\psi_1\theta^\top m+\psi_2\log\sqrt{\theta^\top\Sigma\theta}.$$
@@ -75,6 +88,39 @@ uniform sampling of the entire symmetric Frobenius sphere. Mean direction
 Mix and SMix share theta/psi; all budgets use prefixes of one maximum-size
 bank. Regenerating banks with different maximum lengths is not the same as
 taking prefixes; saved banks are the definitive reproducibility record.
+
+The distribution-space families follow the ray sampling laws in
+[Bonet et al., Appendix B.2](https://arxiv.org/abs/2510.04579), with the
+default base Gaussian used by their GMM code:
+
+- **B:** base `N(0,I_d)`. Sample independent unit vectors `v,z` and Haar `Q`,
+  set `A=Q diag(abs(z)) Q.T`, then normalize `(v,A)` jointly to get `(u,S)`
+  with `||u||^2 + ||S||_F^2 = 1` and `S` positive semidefinite. The ray is
+  `N(t*u, (I+t*S)^2)`. Both squared speeds are 1/2 under this sampling law.
+- **B1D:** sample `theta` uniformly on the unit sphere and `a` uniformly on
+  `[-1,1]`, set `b=sqrt(1-a^2)`. After spatial projection, use the 1D ray
+  `N(t*a,(1+t*b)^2)` starting at `N(0,1)`. This is not a uniform semicircle
+  angle and is not the Mix/SMix mixing law.
+
+Their scalar locations are
+
+$$p_s^{\rm B}(m,\Sigma)=-u^\top m+\operatorname{tr}(S)-\operatorname{tr}\big((S\Sigma S)^{1/2}\big),$$
+$$p_s^{\rm B1D}(m,\Sigma)=-a\,\theta^\top m-b\big(\sqrt{\theta^\top\Sigma\theta}-1\big).$$
+
+For B, the general endpoint formula has `T=I+S` and `C=S^2`. The matrices
+`Sigma^(1/2) S^2 Sigma^(1/2)` and `S Sigma S` have the same eigenvalues,
+so their square-root traces agree. This avoids reconstructing endpoints,
+matrix inverses and cancellation when computing `C`. Matrix batches are
+chunked to bound memory. For B1D, the covariance contraction uses **all**
+entries (`theta.T @ Sigma @ theta`), correcting the diagonal-only einsum in
+the upstream GMM file; the subsequent square root is the standard deviation.
+Full-covariance reference tests cover this difference explicitly.
+
+`distribution_proj/` exposes both samplers and projection functions;
+`lsot/projections.py` dispatches all four families. B and B1D have separate
+saved banks, while Mix/SMix retain their existing shared bank and exact
+seeded draws. Avg/min and smaller L always use the same family's bank.
+No projected-distance solver from the Busemann repo replaces the LSOT lift.
 
 Within each projection, equal scalar locations are aggregated into fibers.
 For sorted fiber masses A_r,B_t and cumulative masses U_r,V_t,
@@ -102,7 +148,7 @@ Selection is global for the GMM pair, before applying the map to pixels. It
 does not minimize the scalar projected distance and does not average the
 candidate plans. This finite search approximates the theoretical infimum;
 it does not optimize over every possible direction. Avg and min use identical
-prefixes of the same bank, with unchanged Mix/SMix projection formulas.
+prefixes of the same family's bank. The lift is identical for all four families.
 For that bank, up to numerical roundoff,
 
 $$MW_2^2\leq C_{\ell^\star}\leq L^{-1}\sum_{\ell=1}^L C_\ell.$$
@@ -121,6 +167,18 @@ from lsot import minimum_lsot
 result = minimum_lsot(source_gmm, target_gmm, bank, kind="Mix")
 plan = result.plan
 print(result.cost_squared.item(), result.projection_index)  # zero-based index
+```
+
+For a new distribution-space bank:
+
+```python
+from lsot.projections import sample_projection_bank
+from lsot import average_lsot, minimum_lsot
+
+bank = sample_projection_bank(source_gmm.dimension, 100, kind="B1D", seed=0,
+                              device=source_gmm.means.device, dtype=source_gmm.means.dtype)
+average = average_lsot(source_gmm, target_gmm, bank, kind="B1D")
+minimum = minimum_lsot(source_gmm, target_gmm, bank, kind="B1D")
 ```
 
 The original `MixSW`/`SMixW` function signatures remain usable. They still
@@ -163,7 +221,7 @@ Default precision is float64. Install a CUDA-enabled PyTorch build to use GPU.
   Host/device transfers in its wrapper are included in transport time.
 - **LSOT solver** and the common map run in PyTorch on the selected device.
   LSOT evaluates true Gaussian costs only on transported component pairs.
-- **Transport runtime** includes parameter projection, sorting/lifting and
+- **Transport runtime** includes Gaussian projection, sorting/lifting and
   true cost evaluation for LSOT; dense cost assembly and LP for MW2.
   Minimum LSOT includes constructing and scoring **all** L candidates and
   selecting the winner. It does not reuse work from the timed average run.
@@ -171,7 +229,10 @@ Default precision is float64. Install a CUDA-enabled PyTorch build to use GPU.
   transfer to CPU is included in map application. CUDA timings synchronize
   before and after calls. Each stage has warmups and recorded repetitions.
 - **Banks** are sampled once before repeated timing; `bank_sampling_ms`
-  records this maximum-bank preparation separately. It is not included in
+  records preparation of the row's family maximum bank separately. Mix/SMix
+  share one preparation, so those repeated values should not be summed.
+  B's matrix eigendecompositions for each component/projection remain inside
+  transport time. Bank sampling is not included in
   `transport_ms_mean` or `pipeline_ms`.
 - **Pipeline runtime** is shared EM + input preparation + transport + map
   setup + pixel mapping + optional guided filtering. File I/O, downloading,
@@ -193,6 +254,8 @@ Each run writes the following under its configured output directory:
 | `source.png`, `target.png` | Images actually used after any explicit resize |
 | `seed_N/gmms.npz` | The two shared fitted GMMs |
 | `seed_N/projection_bank.npz` | theta, psi and Mix matrices for the largest L |
+| `seed_N/projection_bank_B.npz` | B mean velocities and PSD tangent matrices |
+| `seed_N/projection_bank_B1D.npz` | B1D spatial directions, mean speeds and std speeds |
 | `seed_N/evaluation_bank.npz` | Independent RGB evaluation directions and sampled pixel indices |
 | `seed_N/*_plan.npz` | Sparse rows, cols, mass, shape; no forced dense LSOT plan |
 | `seed_N/min-LSOT-*_selection.npz` | Zero-based selected index and all L true Gaussian costs |
@@ -202,8 +265,13 @@ Each run writes the following under its configured output directory:
 `save_raw=true` also writes unfiltered, unclipped float output arrays.
 Existing averaged filenames remain `LSOT-Mix_L100`, `LSOT-SMix_L100`, etc.;
 minimum results use `min-LSOT-Mix_L100`, `min-LSOT-SMix_L100`, etc.
+The new outputs use `LSOT-B_L100`, `LSOT-B1D_L100`, and their `min-` versions.
+Only banks for requested families are saved. Use a fresh output directory
+when changing the set of methods to avoid mixing new and older image files.
 
 - `aggregation`: `avg` or `min`, empty for MW2.
+- `projection_family`: `Mix`, `SMix`, `B`, or `B1D`, empty for MW2.
+- `projection_bank`: filename of this family's saved bank, relative to `seed_N/`.
 - `selected_projection`: zero-based index into the saved shared bank, only
   for minimum LSOT. The selection archive stores the costs in bank order.
 - `cost_squared`: `sum(P_ij * c_ij)`, the unregularized Gaussian transport cost.
@@ -231,6 +299,8 @@ method or projection seed based on observed performance.
 | --- | --- |
 | `gmmot.py` | Unchanged MW2 reference routines |
 | `param_proj/` | Original projected distances and reusable Mix/SMix banks |
+| `distribution_proj/` | B/B1D ray banks and full-covariance scalar projections |
+| `lsot/projections.py` | Shared dispatch for all four projection families |
 | `lsot/gaussians.py` | Validated GMMs and sparse-pair Gaussian costs |
 | `lsot/plans.py` | Monotone OT, proportional lifting, average/min aggregation, MW2 adapter |
 | `lsot/maps.py` | Gaussian pair maps and posterior-weighted Tmean |
@@ -253,6 +323,10 @@ choose the wrong plan. Tests also check the MW2/min/avg cost bounds and
 nonincreasing minimum cost for nested budgets. End-to-end tests
 cover PNG normalization and images with different shapes. CUDA equivalence
 tests run only when a CUDA device is available.
+The B projection is compared to the independent SciPy endpoint formula;
+B1D tests include nonzero covariance cross terms and use standard deviation.
+Unit-speed rays, base-point values, batching, saved-bank replay, and the
+unchanged Mix/SMix bank are checked as well.
 
 See [ATTRIBUTION.md](ATTRIBUTION.md) for provenance. Downloaded images,
 environment files and generated experiment outputs are not committed.

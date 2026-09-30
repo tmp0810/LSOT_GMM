@@ -14,6 +14,25 @@
 - Reference paper: Julie Delon and Agnès Desolneux, *A Wasserstein-type distance
   in the space of Gaussian Mixture Models*, SIAM Journal on Imaging Sciences
   13(2), 936–970, 2020. https://arxiv.org/abs/1907.05254
+- `distribution_proj/` is a Torch implementation of the Gaussian Busemann
+  formulas and ray laws from Clément Bonet, Elsa Cazelles, Lucas Drumetz and
+  Nicolas Courty, *Busemann Functions in the Wasserstein Space: Existence,
+  Closed-Forms, and Applications to Slicing*, AISTATS 2026.
+  https://arxiv.org/abs/2510.04579 (Eq. (18)-(19), Appendix B.2).
+  We reviewed their [reference repository](https://github.com/clbonet/Busemann_Functions_in_the_Wasserstein_Space)
+  at commit `5bb8a254f9c340a7a37af14218b7d6b06130e3d0`, specifically
+  `lib_torch/sliced_busemann_gaussian.py` (`busemannGaussians` and
+  `busemann_sliced_gaussian`), `lib_torch/utils_bw.py` (`exp_bw`), and
+  `xp_gaussian_mixtures/sliced_busemann_gaussian1d.py`.
+  Our implementation exposes scalar locations and reusable seeded banks
+  instead of their sliced-distance functions, using the default base `eps=1`.
+  B uses the equivalent `tr(sqrt(S Sigma S))` expression with bounded matrix
+  batches. B1D corrects the upstream repeated-index einsum to include every
+  covariance entry in `theta.T Sigma theta`; it retains the standard-deviation
+  coordinate and the uniform `[-1,1]` mean-speed sampling. We did not copy the
+  experiment notebooks or their unrelated torchdr/OTDD dependencies.
+  The reviewed upstream tree has no top-level license file; no license for
+  upstream material is inferred or added here.
 
 Image assets are downloaded on demand from the upstream repository and
 verified against the Git blob hashes reviewed for this implementation.

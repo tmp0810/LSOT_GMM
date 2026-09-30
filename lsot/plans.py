@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from param_proj.projections import project_gaussians
+from .projections import project_gaussians
 from .gaussians import gaussian_pair_costs
 
 
