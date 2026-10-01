@@ -9,7 +9,7 @@
   "projection_kinds": ["Mix", "SMix", "B", "B1D"],
   "aggregations": ["min"],
   "seeds": [0],
-  "projection_seeds": [0, 1, 2, 3, 4],
+  "projection_seed": [0, 1, 2, 3, 4],
   "device": "auto",
   "dtype": "float64",
   "max_side": null,
