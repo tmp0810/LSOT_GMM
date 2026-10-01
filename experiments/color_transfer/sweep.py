@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .run import (
     build_parser, config_from_arguments, run_experiment,
-    _summarize, _write_json, _write_rows,
+    _summarize, _projection_seed_summary, _write_json, _write_rows,
 )
 
 DEFAULT_COMPONENT_COUNTS = (10, 20, 50, 100, 200)
@@ -57,6 +57,7 @@ def _save_sweep_results(folder, rows):
     summary = _summarize(rows)
     _write_rows(folder / "metrics.csv", rows)
     _write_rows(folder / "paper_results.tsv", summary, delimiter="\t")
+    _write_rows(folder / "projection_seed_results.tsv", _projection_seed_summary(rows), delimiter="\t")
     compact = [{
         "K": row["K0"], "method": row["method"], "L": row["L"],
         "runtime_ms": row["transport_ms_mean_across_seeds_mean"],
@@ -78,7 +79,7 @@ def _print_table(title, rows):
         strings.append(["--" if row[key] is None else
                         (str(row[key]) if key == "K" else f"{row[key]:.6g}") for key in keys])
     widths = [max(len(row[i]) for row in strings) for i in range(len(keys))]
-    print(f"\n{title} (mean across data seeds)", flush=True)
+    print(f"\n{title} (mean across data/projection-seed runs; MW2 once per data seed)", flush=True)
     for row in strings:
         print("  ".join(value.rjust(width) for value, width in zip(row, widths)), flush=True)
 
@@ -103,9 +104,11 @@ def run_component_sweep(config, component_counts=DEFAULT_COMPONENT_COUNTS):
         "setting": "K0=K1=K. Same images, preprocessing, seeds and maximum projection "
                    "budgets across K; GMMs are fitted once per image/seed/K and shared "
                    "by every method. Projection and evaluation banks do not depend on K.",
-        "tables": "Rows K, columns method/L, means across data seeds. Runtime is solver "
+        "tables": "Rows K, columns method/L, LSOT means across data/projection-seed runs. "
+                  "MW2 is evaluated once per data seed, not repeated for projection seeds. Runtime is solver "
                   "time in ms, including true Gaussian cost evaluation. It excludes EM "
-                  "and pixel mapping. Standard deviations are in paper_results.tsv.",
+                  "and pixel mapping. Descriptive pooled standard deviations and run counts are "
+                  "in paper_results.tsv; projection_seed_results.tsv separates projection seeds.",
     }
     _write_json(folder / "sweep_config.json", manifest)
     rows = []

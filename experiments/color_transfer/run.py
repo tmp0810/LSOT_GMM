@@ -34,7 +34,7 @@ class Config:
     projection_kinds: list = field(default_factory=lambda: list(PROJECTION_KINDS))
     aggregations: list = field(default_factory=lambda: ["avg", "min"])
     seeds: list = field(default_factory=lambda: [0])
-    projection_seed: int = 20260909
+    projection_seed: int | list[int] = 20260909
     device: str = "auto"
     dtype: str = "float64"
     max_side: int | None = None
@@ -55,7 +55,16 @@ class Config:
     eval_seed: int = 42
     save_raw: bool = False
 
+    def projection_seed_values(self):
+        """Scalar keeps the legacy layout; a list requests a projection sweep."""
+        values = self.projection_seed if isinstance(self.projection_seed, list) else [self.projection_seed]
+        if (not values or any(type(value) is not int or value < 0 for value in values)
+                or len(set(values)) != len(values)):
+            raise ValueError("projection_seed must be a nonnegative integer or a nonempty list of distinct nonnegative integers")
+        return values
+
     def validate(self):
+        self.projection_seed_values()
         if not self.projection_counts or any(n < 1 for n in self.projection_counts):
             raise ValueError("projection_counts must contain positive integers")
         if (not self.projection_kinds or len(set(self.projection_kinds)) != len(self.projection_kinds)
@@ -104,13 +113,14 @@ def _plan_rmse(plan, reference):
     return float(torch.sqrt(difference.square().sum() / (plan.shape[0] * plan.shape[1])).item())
 
 
-def _prepare_banks(config, seed, device, dtype, folder):
+def _prepare_banks(config, seed, device, dtype, folder, *, projection_seed=None):
     """Sample once per family; preserve the existing shared Mix/SMix bank.
 
     Separate local generators keep old parameter banks unchanged when new
     families are enabled. Each family reuses its bank for both aggregations
     and all prefix budgets. Only bank preparation is timed here.
     """
+    projection_seed = config.projection_seed if projection_seed is None else projection_seed
     banks, times, files = {}, {}, {}
     groups = {"Mix": "parameter", "SMix": "parameter", "B": "B", "B1D": "B1D"}
     prepared = {}
@@ -120,7 +130,7 @@ def _prepare_banks(config, seed, device, dtype, folder):
             synchronize(device)
             start = time.perf_counter()
             bank = sample_projection_bank(3, max(config.projection_counts), kind=kind,
-                                          seed=config.projection_seed + seed, device=device, dtype=dtype)
+                                          seed=projection_seed + seed, device=device, dtype=dtype)
             synchronize(device)
             elapsed = 1000 * (time.perf_counter() - start)
             filename = "projection_bank.npz" if group == "parameter" else f"projection_bank_{group}.npz"
@@ -142,7 +152,11 @@ def _summarize(rows):
         entry = {"method": method, "L": count, "K0": first["K0"], "K1": first["K1"],
                  "projection_family": first["projection_family"],
                  "aggregation": first["aggregation"],
-                 "device": first["device"], "n_seeds": len(group)}
+                 "device": first["device"],
+                 "n_seeds": len({r["seed"] for r in group}),
+                 "n_projection_seeds": len({r.get("projection_seed") for r in group
+                                            if r.get("projection_seed") is not None}),
+                 "n_runs": len(group)}
         for name in metrics:
             values = [r[name] for r in group if r[name] is not None]
             entry[name + "_across_seeds_mean"] = float(np.mean(values)) if values else None
@@ -151,9 +165,25 @@ def _summarize(rows):
     return summary
 
 
+def _projection_seed_summary(rows):
+    """Separate bank seeds; MW2 is listed once with an empty projection seed.
+
+    Within each bank seed, statistics are across data seeds only. The main
+    summary instead pools (data seed, projection seed) runs for LSOT; its
+    standard deviations are descriptive, not independent-replicate errors.
+    """
+    groups = {}
+    for row in rows:
+        groups.setdefault(row.get("projection_seed"), []).append(row)
+    return [{"projection_seed": seed, **entry}
+            for seed, group in groups.items() for entry in _summarize(group)]
+
+
 def run_experiment(config):
     """Write images, sparse plans, saved GMMs/banks, timings and evaluation data."""
     config.validate()
+    projection_seeds = config.projection_seed_values()
+    seed_sweep = isinstance(config.projection_seed, list)
     device_name = ("cuda:0" if torch.cuda.is_available() else "cpu") if config.device == "auto" else config.device
     device = torch.device(device_name)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -194,6 +224,11 @@ def run_experiment(config):
         "minimum_selection": "One lift for the entire GMM pair, minimizing true Gaussian W2-squared "
                              "cost over the shared finite bank. Zero-based index; first index on exact ties.",
         "projection_families": config.projection_kinds,
+        "projection_seed_policy": "projection_seed accepts an integer or list. Effective bank seed "
+                                  "equals projection_seed + data seed (legacy convention). GMMs, "
+                                  "evaluation samples and MW2 are shared across bank seeds. "
+                                  "paper_results.tsv pools LSOT runs; projection_seed_results.tsv "
+                                  "separates bank seeds. Pooled standard deviations are descriptive.",
         "distribution_projections": "Bonet et al. Gaussian ray laws: B at base N(0,I_3), "
                                     "B1D at base N(0,1), with full theta.T Sigma theta. "
                                     "Upstream revision: 5bb8a254f9c340a7a37af14218b7d6b06130e3d0.",
@@ -219,19 +254,31 @@ def run_experiment(config):
             points = torch.as_tensor(x, dtype=dtype, device=device)
             synchronize(device)
             input_ms = 1000 * (time.perf_counter() - start)
-            banks, bank_times, bank_files = _prepare_banks(config, seed, device, dtype, folder)
             evaluator = ColorEvaluator.create(x, y, samples=config.eval_samples,
                                               projections=config.eval_projections, seed=config.eval_seed + seed)
             np.savez_compressed(folder / "evaluation_bank.npz", source_indices=evaluator.source_indices,
                                 target_indices=evaluator.target_indices, directions=evaluator.directions)
             outputs, guided_outputs, timing_rows = [], [], {}
             reference_plan, reference_cost, reference_output = None, None, None
-            jobs = [("MW2", 0, None)] + [
-                (kind, count, aggregation) for count in sorted(set(config.projection_counts))
+            active_projection_seed = None
+            jobs = [("MW2", 0, None, None)] + [
+                (kind, count, aggregation, projection_seed) for projection_seed in projection_seeds
+                for count in sorted(set(config.projection_counts))
                 for aggregation in config.aggregations for kind in config.projection_kinds]
-            for kind, count, aggregation in jobs:
+            for kind, count, aggregation, projection_seed in jobs:
                 method = "MW2" if kind == "MW2" else f"{'min-' if aggregation == 'min' else ''}LSOT-{kind}"
                 name = method if count == 0 else f"{method}_L{count}"
+                method_folder = folder
+                display_name = name
+                if kind != "MW2":
+                    if seed_sweep:
+                        method_folder = folder / f"projection_seed_{projection_seed}"
+                        display_name = f"{name}_P{projection_seed}"
+                    method_folder.mkdir(parents=True, exist_ok=True)
+                    if active_projection_seed != projection_seed:
+                        banks, bank_times, bank_files = _prepare_banks(
+                            config, seed, device, dtype, method_folder, projection_seed=projection_seed)
+                        active_projection_seed = projection_seed
                 if kind == "MW2":
                     def solver():
                         plan, cost = solve_mw2(source, target)
@@ -270,26 +317,28 @@ def run_experiment(config):
                     start = time.perf_counter()
                     filtered = guided_output(source_image, mapped, config.guided_radius, config.guided_epsilon)
                     post_ms = 1000 * (time.perf_counter() - start)
-                    save_rgb(folder / f"{name}_guided.png", filtered)
-                    guided_outputs.append((name, filtered))
-                save_rgb(folder / f"{name}.png", mapped)
+                    save_rgb(method_folder / f"{name}_guided.png", filtered)
+                    guided_outputs.append((display_name, filtered))
+                save_rgb(method_folder / f"{name}.png", mapped)
                 if config.save_raw:
-                    np.save(folder / f"{name}_raw.npy", mapped)
-                _save_plan(folder / f"{name}_plan.npz", plan)
+                    np.save(method_folder / f"{name}_raw.npy", mapped)
+                _save_plan(method_folder / f"{name}_plan.npz", plan)
                 if selection is not None:
-                    np.savez_compressed(folder / f"{name}_selection.npz",
+                    np.savez_compressed(method_folder / f"{name}_selection.npz",
                                         projection_index=selection.projection_index,
                                         projection_costs=_numpy(selection.projection_costs))
-                outputs.append((name, mapped))
+                outputs.append((display_name, mapped))
                 transport_mean, transport_std = time_summary(transport_times)
                 setup_mean, setup_std = time_summary(setup_times)
                 apply_mean, apply_std = time_summary(apply_times)
                 row = {
-                    "seed": seed, "method": method, "K0": source.count, "K1": target.count,
+                    "seed": seed, "projection_seed": projection_seed,
+                    "effective_projection_seed": projection_seed + seed if projection_seed is not None else None,
+                    "method": method, "K0": source.count, "K1": target.count,
                     "d": 3, "L": count, "device": str(device), "dtype": config.dtype,
                     "aggregation": aggregation,
                     "projection_family": kind if kind != "MW2" else None,
-                    "projection_bank": bank_files[kind] if kind != "MW2" else None,
+                    "projection_bank": str((method_folder / bank_files[kind]).relative_to(folder)) if kind != "MW2" else None,
                     "selected_projection": selection.projection_index if selection is not None else None,
                     "solver_backend": "scipy+POT(cpu)" if kind == "MW2" else "torch",
                     "source_pixels": len(x), "target_pixels": len(y),
@@ -312,16 +361,17 @@ def run_experiment(config):
                     "clipped_channel_fraction": float(np.mean((mapped < 0) | (mapped > 1))),
                 }
                 all_rows.append(row)
-                timing_rows[name] = {"transport_ms": transport_times, "map_setup_ms": setup_times,
+                timing_rows[display_name] = {"transport_ms": transport_times, "map_setup_ms": setup_times,
                                      "map_apply_ms": apply_times}
                 # Save after each method so a long run retains completed results.
                 _write_rows(output_dir / "metrics.csv", all_rows)
                 _write_json(folder / "timings.json", timing_rows)
-                print(f"  {name}: cost={cost:.6g}, transport={transport_mean:.2f} ms, color SW2={row['color_sw2']:.6g}", flush=True)
+                print(f"  {display_name}: cost={cost:.6g}, transport={transport_mean:.2f} ms, color SW2={row['color_sw2']:.6g}", flush=True)
             save_comparison(folder / "comparison.png", source_image, target_image, outputs)
             if guided_outputs:
                 save_comparison(folder / "comparison_guided.png", source_image, target_image, guided_outputs)
     _write_rows(output_dir / "paper_results.tsv", _summarize(all_rows), delimiter="\t")
+    _write_rows(output_dir / "projection_seed_results.tsv", _projection_seed_summary(all_rows), delimiter="\t")
     print(f"Saved results to {output_dir.resolve()}", flush=True)
     return all_rows
 
@@ -341,6 +391,8 @@ def build_parser(description=__doc__):
     parser.add_argument("--aggregations", choices=["avg", "min"], nargs="+",
                         help="LSOT aggregation(s), overriding the config")
     parser.add_argument("--seeds", type=int, nargs="+")
+    parser.add_argument("--projection-seeds", type=int, nargs="+",
+                        help="sweep projection seeds on each shared GMM; overrides projection_seed")
     parser.add_argument("--max-side", type=int)
     parser.add_argument("--fit-pixels", type=int)
     return parser
@@ -361,6 +413,8 @@ def config_from_arguments(args):
         values["components_target"] = args.components[-1]
     if args.projections:
         values["projection_counts"] = args.projections
+    if args.projection_seeds is not None:
+        values["projection_seed"] = args.projection_seeds
     return Config(**values)
 
 

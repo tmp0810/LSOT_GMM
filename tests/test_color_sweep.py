@@ -10,6 +10,82 @@ from experiments.color_transfer.run import Config
 from experiments.color_transfer.sweep import run_component_sweep, comparison_tables
 
 
+def test_projection_seed_sweep_shares_fit_and_reference(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    import experiments.color_transfer.run as run
+    rng = np.random.default_rng(23)
+    for name in ("source", "target"):
+        Image.fromarray(rng.integers(0, 256, (10, 11, 3), dtype=np.uint8)).save(tmp_path / f"{name}.png")
+    fit = Mock(wraps=run.fit_gmm)
+    solve = Mock(wraps=run.solve_mw2)
+    monkeypatch.setattr(run, "fit_gmm", fit)
+    monkeypatch.setattr(run, "solve_mw2", solve)
+    folder = tmp_path / "out"
+    config = Config(source=str(tmp_path / "source.png"), target=str(tmp_path / "target.png"),
+                    output_dir=str(folder), download_reference=False, device="cpu",
+                    projection_seed=[42, 43], projection_counts=[2, 4], seeds=[1],
+                    projection_kinds=["Mix", "SMix"], repeats=1, warmups=0,
+                    map_repeats=1, guided_filter=False, eval_samples=32, eval_projections=3)
+    rows = run_component_sweep(config, [2, 3])
+    assert fit.call_count == 4  # two images x two K; NOT multiplied by projection seeds
+    assert solve.call_count == 2
+    assert len(rows) == 2 * (1 + 2 * 2 * 2 * 2)
+    for k in [2, 3]:
+        root = folder / f"K_{k}" / "seed_1"
+        assert (root / "gmms.npz").is_file()
+        assert (root / "evaluation_bank.npz").is_file()
+        selected_rows = [r for r in rows if r["K0"] == k]
+        assert sum(r["method"] == "MW2" for r in selected_rows) == 1
+        for row in selected_rows:
+            if row["method"] == "MW2":
+                assert row["projection_seed"] is None
+                continue
+            ps = row["projection_seed"]
+            assert row["effective_projection_seed"] == ps + 1
+            assert (root / row["projection_bank"]).is_file()
+            output = root / f"projection_seed_{ps}" / f"{row['method']}_L{row['L']}"
+            assert output.with_suffix(".png").is_file()
+            assert output.with_name(output.name + "_plan.npz").is_file()
+            assert row["marginal_l1_error"] < 1e-12
+        first = np.load(root / "projection_seed_42" / "projection_bank.npz")
+        second = np.load(root / "projection_seed_43" / "projection_bank.npz")
+        assert not np.array_equal(first["theta"], second["theta"])
+    for ps in [42, 43]:
+        a = np.load(folder / "K_2" / "seed_1" / f"projection_seed_{ps}" / "projection_bank.npz")
+        b = np.load(folder / "K_3" / "seed_1" / f"projection_seed_{ps}" / "projection_bank.npz")
+        for key in a.files:
+            np.testing.assert_array_equal(a[key], b[key])
+    with (folder / "projection_seed_results.tsv").open() as stream:
+        split = list(csv.DictReader(stream, delimiter="\t"))
+    assert len(split) == len(rows)
+    with (folder / "paper_results.tsv").open() as stream:
+        summary = list(csv.DictReader(stream, delimiter="\t"))
+    for row in summary:
+        assert int(row["n_seeds"]) == 1
+        assert int(row["n_runs"]) == (1 if row["method"] == "MW2" else 2)
+        assert int(row["n_projection_seeds"]) == (0 if row["method"] == "MW2" else 2)
+
+
+@pytest.mark.parametrize("value", [[], [1, 1], [True], [-1], [1.5], "42", True])
+def test_invalid_projection_seeds(value):
+    with pytest.raises(ValueError, match="projection_seed"):
+        Config(projection_seed=value).validate()
+
+
+def test_projection_seed_cli_and_singleton_list(tmp_path):
+    from experiments.color_transfer.run import build_parser, config_from_arguments
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"projection_seed": 42}))
+    parser = build_parser()
+    scalar = config_from_arguments(parser.parse_args(["--config", str(path)]))
+    assert scalar.projection_seed_values() == [42]
+    one = config_from_arguments(parser.parse_args(["--config", str(path), "--projection-seeds", "7"]))
+    assert one.projection_seed == [7]
+    many = config_from_arguments(parser.parse_args(["--config", str(path), "--projection-seeds", "0", "1", "2"]))
+    many.validate()
+    assert many.projection_seed == [0, 1, 2]
+
+
 def test_offline_component_sweep_tables_and_fixed_banks(tmp_path):
     rng = np.random.default_rng(65)
     for name in ("source", "target"):
