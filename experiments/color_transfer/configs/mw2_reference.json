@@ -5,7 +5,7 @@
   "output_dir": "results/color_transfer/mw2_reference",
   "components_source": 10,
   "components_target": 10,
-  "projection_counts": [10,50,200,2000,5000],
+  "projection_counts": [5, 10, 20, 30, 40, 50],
   "projection_kinds": ["Mix", "SMix", "B", "B1D"],
   "aggregations": ["min", "min-opt"],
   "opt_steps": 20,
