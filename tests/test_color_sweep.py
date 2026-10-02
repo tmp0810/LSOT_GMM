@@ -25,11 +25,12 @@ def test_projection_seed_sweep_shares_fit_and_reference(tmp_path, monkeypatch):
                     output_dir=str(folder), download_reference=False, device="cpu",
                     projection_seed=[42, 43], projection_counts=[2, 4], seeds=[1],
                     projection_kinds=["Mix", "SMix"], repeats=1, warmups=0,
-                    map_repeats=1, guided_filter=False, eval_samples=32, eval_projections=3)
+                    map_repeats=1, guided_filter=False, eval_samples=32, eval_projections=3,
+                    opt_steps=1, opt_samples=2)
     rows = run_component_sweep(config, [2, 3])
     assert fit.call_count == 4  # two images x two K; NOT multiplied by projection seeds
     assert solve.call_count == 2
-    assert len(rows) == 2 * (1 + 2 * 2 * 2 * 2)
+    assert len(rows) == 2 * (1 + 2 * 2 * 2 * 3)
     for k in [2, 3]:
         root = folder / f"K_{k}" / "seed_1"
         assert (root / "gmms.npz").is_file()
@@ -94,17 +95,18 @@ def test_offline_component_sweep_tables_and_fixed_banks(tmp_path):
     config = Config(source=str(tmp_path / "source.png"), target=str(tmp_path / "target.png"),
                     output_dir=str(folder), download_reference=False, device="cpu",
                     projection_counts=[2], seeds=[0, 1], repeats=1, warmups=0,
-                    map_repeats=1, guided_filter=False, eval_samples=32, eval_projections=3)
+                    map_repeats=1, guided_filter=False, eval_samples=32, eval_projections=3,
+                    opt_steps=1, opt_samples=2)
     rows = run_component_sweep(config, [2, 3])
-    assert len(rows) == 2 * 2 * 9
+    assert len(rows) == 2 * 2 * 13
     assert {r["K0"] for r in rows} == {2, 3}
     assert config.components_source == 10  # the caller's config is not mutated
     with (folder / "paper_results.tsv").open() as stream:
         summary = list(csv.DictReader(stream, delimiter="\t"))
-    assert len(summary) == 18 and all(int(r["n_seeds"]) == 2 for r in summary)
+    assert len(summary) == 26 and all(int(r["n_seeds"]) == 2 for r in summary)
     with (folder / "comparison.tsv").open() as stream:
         compact = list(csv.DictReader(stream, delimiter="\t"))
-    assert len(compact) == 18
+    assert len(compact) == 26
     assert list(compact[0]) == ["K", "method", "L", "runtime_ms", "cost_squared", "color_sw2", "plan_rmse"]
     np.testing.assert_allclose(float(compact[0]["cost_squared"]),
                                float(summary[0]["cost_squared_across_seeds_mean"]))
@@ -113,7 +115,7 @@ def test_offline_component_sweep_tables_and_fixed_banks(tmp_path):
         with (folder / f"{filename}.tsv").open() as stream:
             table = list(csv.DictReader(stream, delimiter="\t"))
         assert [int(r["K"]) for r in table] == [2, 3]
-        assert len(table[0]) == 10  # K plus nine distinct methods
+        assert len(table[0]) == 14  # K plus thirteen distinct methods
         for entry in table:
             k = int(entry["K"])
             for row in summary:

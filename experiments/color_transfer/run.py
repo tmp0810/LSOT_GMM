@@ -1,4 +1,4 @@
-"""Compare preserved MW2 with averaged/minimum LSOT (Mix, SMix, B, B1D).
+"""Compare MW2 with averaged, finite minimum, and optimized minimum LSOT.
 
 python -m experiments.color_transfer.run --config experiments/color_transfer/configs/smoke.json
 """
@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from threadpoolctl import threadpool_limits
 
-from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, solve_mw2
+from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, optimized_minimum_lsot, solve_mw2
 from lsot.projections import PROJECTION_KINDS, sample_projection_bank
 from .data import download_reference_images, fit_gmm, guided_output, read_rgb, save_rgb
 from .evaluation import ColorEvaluator, benchmark, save_comparison, synchronize, time_summary
@@ -32,7 +32,12 @@ class Config:
     components_target: int = 10
     projection_counts: list = field(default_factory=lambda: [10, 50, 100])
     projection_kinds: list = field(default_factory=lambda: list(PROJECTION_KINDS))
-    aggregations: list = field(default_factory=lambda: ["avg", "min"])
+    aggregations: list = field(default_factory=lambda: ["avg", "min", "min-opt"])
+    opt_steps: int = 20
+    opt_samples: int = 8
+    opt_epsilon: float = 0.05
+    opt_learning_rate: float = 0.05
+    opt_max_gradient_norm: float = 10.0
     seeds: list = field(default_factory=lambda: [0])
     projection_seed: int | list[int] = 20260909
     device: str = "auto"
@@ -71,8 +76,14 @@ class Config:
                 or not set(self.projection_kinds) <= set(PROJECTION_KINDS)):
             raise ValueError(f"projection_kinds must contain distinct values from {PROJECTION_KINDS}")
         if (not self.aggregations or len(set(self.aggregations)) != len(self.aggregations)
-                or not set(self.aggregations) <= {"avg", "min"}):
-            raise ValueError("aggregations must contain distinct values from 'avg', 'min'")
+                or not set(self.aggregations) <= {"avg", "min", "min-opt"}):
+            raise ValueError("aggregations must contain distinct values from 'avg', 'min', 'min-opt'")
+        if (type(self.opt_steps) is not int or self.opt_steps < 0
+                or type(self.opt_samples) is not int or self.opt_samples < 1
+                or not np.isfinite([self.opt_epsilon, self.opt_learning_rate,
+                                    self.opt_max_gradient_norm]).all()
+                or min(self.opt_epsilon, self.opt_learning_rate, self.opt_max_gradient_norm) <= 0):
+            raise ValueError("invalid min-opt projection optimization settings")
         if not self.seeds or len(set(self.seeds)) != len(self.seeds):
             raise ValueError("seeds must be nonempty and distinct")
         if self.dtype not in {"float32", "float64"}:
@@ -117,7 +128,7 @@ def _prepare_banks(config, seed, device, dtype, folder, *, projection_seed=None)
     """Sample once per family; preserve the existing shared Mix/SMix bank.
 
     Separate local generators keep old parameter banks unchanged when new
-    families are enabled. Each family reuses its bank for both aggregations
+    families are enabled. Each family reuses its bank for all aggregations
     and all prefix budgets. Only bank preparation is timed here.
     """
     projection_seed = config.projection_seed if projection_seed is None else projection_seed
@@ -215,7 +226,8 @@ def run_experiment(config):
         "input_sha256": {str(p): hashlib.sha256(Path(p).read_bytes()).hexdigest()
                          for p in (config.source, config.target)},
         "timing": "Wall clock with CUDA synchronization. Transport includes cost evaluation. "
-                  "Minimum LSOT includes constructing and scoring all candidate lifts and selecting the best. "
+                  "Minimum LSOT includes constructing and scoring all candidate lifts. "
+                  "Optimized minimum additionally includes every Stein-gradient perturbation and update. "
                   "Banks are sampled before timing and bank sampling is reported separately. "
                   "Pipeline excludes file I/O, plotting and evaluation; includes GMM fitting, "
                   "input transfers, transport, map setup/application and optional guided filtering.",
@@ -223,6 +235,9 @@ def run_experiment(config):
         "plan_reference": "MW2 component LP, not full distribution-space W2",
         "minimum_selection": "One lift for the entire GMM pair, minimizing true Gaussian W2-squared "
                              "cost over the shared finite bank. Zero-based index; first index on exact ties.",
+        "optimized_selection": "Initialize from the minimum of the same L bank; use Gaussian-smoothed "
+                               "Stein-gradient steps, retain the best actually evaluated lifted plan. "
+                               "Optimization is heuristic and need not reach the global infimum.",
         "projection_families": config.projection_kinds,
         "projection_seed_policy": "projection_seed accepts an integer or list. Effective bank seed "
                                   "equals projection_seed + data seed (legacy convention). GMMs, "
@@ -266,7 +281,8 @@ def run_experiment(config):
                 for count in sorted(set(config.projection_counts))
                 for aggregation in config.aggregations for kind in config.projection_kinds]
             for kind, count, aggregation, projection_seed in jobs:
-                method = "MW2" if kind == "MW2" else f"{'min-' if aggregation == 'min' else ''}LSOT-{kind}"
+                prefix = {"avg": "", "min": "min-", "min-opt": "min-opt-"}
+                method = "MW2" if kind == "MW2" else f"{prefix[aggregation]}LSOT-{kind}"
                 name = method if count == 0 else f"{method}_L{count}"
                 method_folder = folder
                 display_name = name
@@ -289,6 +305,14 @@ def run_experiment(config):
                     def solver():
                         if aggregation == "min":
                             result = minimum_lsot(source, target, selected_bank, kind)
+                            return result.plan, float(result.cost_squared.item()), result
+                        if aggregation == "min-opt":
+                            result = optimized_minimum_lsot(
+                                source, target, selected_bank, kind,
+                                steps=config.opt_steps, samples=config.opt_samples,
+                                epsilon=config.opt_epsilon, learning_rate=config.opt_learning_rate,
+                                max_gradient_norm=config.opt_max_gradient_norm,
+                                seed=projection_seed + seed)
                             return result.plan, float(result.cost_squared.item()), result
                         plan = average_lsot(source, target, selected_bank, kind)
                         return plan, float(plan.cost(source, target).item()), None
@@ -323,10 +347,19 @@ def run_experiment(config):
                 if config.save_raw:
                     np.save(method_folder / f"{name}_raw.npy", mapped)
                 _save_plan(method_folder / f"{name}_plan.npz", plan)
-                if selection is not None:
+                if aggregation == "min":
                     np.savez_compressed(method_folder / f"{name}_selection.npz",
                                         projection_index=selection.projection_index,
                                         projection_costs=_numpy(selection.projection_costs))
+                elif aggregation == "min-opt":
+                    np.savez_compressed(
+                        method_folder / f"{name}_selection.npz",
+                        initial_projection_index=selection.initial_projection_index,
+                        initial_projection_costs=_numpy(selection.initial_projection_costs),
+                        initial_cost_squared=float(selection.initial_cost_squared.item()),
+                        best_iteration=selection.best_iteration,
+                        cost_history=_numpy(selection.cost_history),
+                        **{f"best_{key}": _numpy(value) for key, value in vars(selection.best_bank).items()})
                 outputs.append((display_name, mapped))
                 transport_mean, transport_std = time_summary(transport_times)
                 setup_mean, setup_std = time_summary(setup_times)
@@ -339,7 +372,9 @@ def run_experiment(config):
                     "aggregation": aggregation,
                     "projection_family": kind if kind != "MW2" else None,
                     "projection_bank": str((method_folder / bank_files[kind]).relative_to(folder)) if kind != "MW2" else None,
-                    "selected_projection": selection.projection_index if selection is not None else None,
+                    "selected_projection": selection.projection_index if aggregation == "min" else None,
+                    "initial_projection": (selection.initial_projection_index if aggregation == "min-opt" else None),
+                    "best_iteration": selection.best_iteration if aggregation == "min-opt" else None,
                     "solver_backend": "scipy+POT(cpu)" if kind == "MW2" else "torch",
                     "source_pixels": len(x), "target_pixels": len(y),
                     "fit_source_pixels": count_x, "fit_target_pixels": count_y,
@@ -388,8 +423,12 @@ def build_parser(description=__doc__):
     parser.add_argument("--projections", type=int, nargs="+")
     parser.add_argument("--projection-kinds", choices=PROJECTION_KINDS, nargs="+",
                         help="projection families; defaults to Mix SMix B B1D")
-    parser.add_argument("--aggregations", choices=["avg", "min"], nargs="+",
+    parser.add_argument("--aggregations", choices=["avg", "min", "min-opt"], nargs="+",
                         help="LSOT aggregation(s), overriding the config")
+    parser.add_argument("--opt-steps", type=int, help="Stein-gradient updates per min-opt call")
+    parser.add_argument("--opt-samples", type=int, help="Gaussian perturbations per update")
+    parser.add_argument("--opt-epsilon", type=float, help="Gaussian perturbation scale")
+    parser.add_argument("--opt-learning-rate", type=float, help="Stein-gradient step size")
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--projection-seeds", type=int, nargs="+",
                         help="sweep projection seeds on each shared GMM; overrides projection_seed")
@@ -402,7 +441,8 @@ def config_from_arguments(args):
     """Load the JSON setting, then apply explicitly provided CLI overrides."""
     values = json.loads(args.config.read_text(encoding="utf-8"))
     for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels",
-                "aggregations", "projection_kinds"):
+                "aggregations", "projection_kinds", "opt_steps", "opt_samples",
+                "opt_epsilon", "opt_learning_rate"):
         value = getattr(args, key)
         if value is not None:
             values[key] = value

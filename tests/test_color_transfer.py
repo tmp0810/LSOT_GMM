@@ -31,9 +31,10 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
                     output_dir=str(tmp_path / "out"), components_source=3, components_target=2,
                     projection_counts=[3], seeds=[2], device="cpu", repeats=1, warmups=0,
                     map_repeats=1, guided_filter=True, guided_radius=2,
-                    eval_samples=64, eval_projections=7, batch_size=31)
+                    eval_samples=64, eval_projections=7, batch_size=31,
+                    opt_steps=2, opt_samples=2)
     rows = run_experiment(config)
-    assert len(rows) == 9
+    assert len(rows) == 13
     assert {r["projection_family"] for r in rows} == {None, "Mix", "SMix", "B", "B1D"}
     for row in rows:
         assert row["marginal_l1_error"] < 1e-12
@@ -67,8 +68,16 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
             bank = bank_type(**{key: torch.tensor(saved_bank[key]) for key in saved_bank.files})
             if row["aggregation"] == "min":
                 replay = minimum_lsot(source_gmm, target_gmm, bank, row["projection_family"]).plan
-            else:
+            elif row["aggregation"] == "avg":
                 replay = average_lsot(source_gmm, target_gmm, bank, row["projection_family"])
+            else:
+                saved = np.load(folder / "seed_2" / f"{name}_selection.npz")
+                best = bank_type(**{key: torch.tensor(saved[f"best_{key}"])
+                                    for key in vars(bank)})
+                replay = minimum_lsot(source_gmm, target_gmm, best, row["projection_family"]).plan
+                assert row["initial_projection"] == int(saved["initial_projection_index"])
+                assert row["best_iteration"] == int(saved["best_iteration"])
+                assert row["cost_squared"] <= float(saved["initial_cost_squared"]) + 1e-12
             np.testing.assert_array_equal(replay.rows.numpy(), plan["rows"])
             np.testing.assert_array_equal(replay.cols.numpy(), plan["cols"])
             np.testing.assert_allclose(replay.mass.numpy(), plan["mass"], atol=1e-15)
@@ -80,7 +89,7 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
             np.testing.assert_allclose(selection["projection_costs"][selected], row["cost_squared"])
             average = next(r for r in rows if r["method"] == row["method"].removeprefix("min-"))
             np.testing.assert_allclose(selection["projection_costs"].mean(), average["cost_squared"])
-        else:
+        elif row["aggregation"] != "min":
             assert row["selected_projection"] is None
         with Image.open(folder / "seed_2" / f"{name}.png") as image:
             assert image.size == (15, 18)
