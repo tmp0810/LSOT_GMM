@@ -32,6 +32,7 @@
   "guided_epsilon": 0.0001,
   "eval_samples": 4096,
   "eval_projections": 500,
+  "eval_w2_samples": 512,
   "eval_seed": 42,
   "save_raw": false
 }

@@ -6,6 +6,7 @@ import torch
 from PIL import Image
 
 from experiments.color_transfer.data import read_rgb, guided_output
+from experiments.color_transfer.evaluation import ColorEvaluator
 from experiments.color_transfer.run import Config, run_experiment
 from distribution_proj import BusemannBank, Busemann1DBank
 from param_proj import ProjectionBank, sample_projection_bank
@@ -22,6 +23,22 @@ def test_png_normalization_and_zero_displacement_filter(tmp_path):
     np.testing.assert_allclose(guided_output(loaded, loaded, radius=2), loaded)
 
 
+def test_exact_empirical_rgb_w2_on_known_two_point_distributions():
+    colors = np.array([[0., 0., 0.], [1., 0., 0.]])
+    evaluator = ColorEvaluator.create(colors, colors[::-1], samples=2,
+                                      projections=3, w2_samples=2, seed=5)
+    np.testing.assert_allclose(evaluator.w2(colors), 0, atol=1e-14)
+    shifted = colors + np.array([0., 0.25, 0.])
+    np.testing.assert_allclose(evaluator.w2(shifted), 0.25, atol=1e-14)
+    np.testing.assert_array_equal(evaluator.w2_source_indices, evaluator.source_indices)
+
+
+@pytest.mark.parametrize("count", [0, -1, 1.5])
+def test_invalid_empirical_w2_budget(count):
+    with pytest.raises(ValueError, match="eval_w2_samples"):
+        Config(eval_w2_samples=count).validate()
+
+
 def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
     rng = np.random.default_rng(4)
     source, target = tmp_path / "source.png", tmp_path / "target.png"
@@ -31,7 +48,7 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
                     output_dir=str(tmp_path / "out"), components_source=3, components_target=2,
                     projection_counts=[3], seeds=[2], device="cpu", repeats=1, warmups=0,
                     map_repeats=1, guided_filter=True, guided_radius=2,
-                    eval_samples=64, eval_projections=7, batch_size=31,
+                    eval_samples=64, eval_projections=7, eval_w2_samples=16, batch_size=31,
                     opt_steps=2, opt_samples=2)
     rows = run_experiment(config)
     assert len(rows) == 13
@@ -41,12 +58,17 @@ def test_offline_pipeline_and_reproducible_saved_inputs(tmp_path):
         assert row["relative_cost_gap"] >= -1e-10
         assert row["source_pixels"] == 270 and row["target_pixels"] == 221
         assert np.isfinite(row["color_sw2"]) and np.isfinite(row["guided_color_sw2"])
+        assert np.isfinite(row["color_w2"]) and np.isfinite(row["guided_color_w2"])
     assert rows[0]["plan_rmse"] == 0
     folder = tmp_path / "out"
     assert (folder / "paper_results.tsv").is_file()
     assert (folder / "seed_2" / "comparison.png").is_file()
     metadata = json.loads((folder / "metadata.json").read_text())
     assert metadata["device"] == "cpu"
+    assert "emd2" in metadata["color_evaluation"]
+    evaluation_bank = np.load(folder / "seed_2" / "evaluation_bank.npz")
+    assert len(evaluation_bank["w2_source_indices"]) == 16
+    assert len(evaluation_bank["w2_target_indices"]) == 16
     gmms = np.load(folder / "seed_2" / "gmms.npz")
     weights = gmms["alpha"]
     source_gmm = GMM.from_numpy(weights, gmms["means_source"], gmms["covariances_source"])

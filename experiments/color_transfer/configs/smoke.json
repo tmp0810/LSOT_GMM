@@ -23,5 +23,6 @@
   "batch_size": 4096,
   "guided_filter": true,
   "eval_samples": 1024,
-  "eval_projections": 32
+  "eval_projections": 32,
+  "eval_w2_samples": 64
 }

@@ -3,7 +3,7 @@
 python -m experiments.color_transfer.sweep --component-counts 10 20 50 100 200
 
 Other settings are inherited from --config, including projection budgets,
-families, avg/min, image preprocessing, timing repetitions and data seeds.
+families, aggregations, image preprocessing, evaluation and data seeds.
 """
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -19,6 +19,8 @@ TABLE_METRICS = {
     "cost_squared": "cost_squared",
     "color_sw2": "color_sw2",
     "guided_color_sw2": "guided_color_sw2",
+    "color_w2": "color_w2",
+    "guided_color_w2": "guided_color_w2",
     "plan_rmse": "plan_rmse",
 }
 
@@ -63,6 +65,7 @@ def _save_sweep_results(folder, rows):
         "runtime_ms": row["transport_ms_mean_across_seeds_mean"],
         "cost_squared": row["cost_squared_across_seeds_mean"],
         "color_sw2": row["color_sw2_across_seeds_mean"],
+        "color_w2": row["color_w2_across_seeds_mean"],
         "plan_rmse": row["plan_rmse_across_seeds_mean"],
     } for row in summary]
     _write_rows(folder / "comparison.tsv", compact, delimiter="\t")
@@ -120,7 +123,7 @@ def run_component_sweep(config, component_counts=DEFAULT_COMPONENT_COUNTS):
         tables = _save_sweep_results(folder, rows)
         manifest["completed_component_counts"].append(k)
         _write_json(folder / "sweep_config.json", manifest)
-    for metric in ("runtime_ms", "cost_squared", "color_sw2"):
+    for metric in ("runtime_ms", "cost_squared", "color_sw2", "color_w2"):
         _print_table(metric, tables[metric])
     print(f"\nSweep tables saved to {folder.resolve()}", flush=True)
     return rows

@@ -57,6 +57,7 @@ class Config:
     guided_epsilon: float = 1e-4
     eval_samples: int = 4096
     eval_projections: int = 128
+    eval_w2_samples: int = 512
     eval_seed: int = 42
     save_raw: bool = False
 
@@ -95,6 +96,9 @@ class Config:
             raise ValueError("invalid warmups or EM tolerances")
         if self.guided_radius < 0 or self.guided_epsilon <= 0:
             raise ValueError("invalid guided-filter parameters")
+        if any(type(value) is not int or value < 1 for value in
+               (self.eval_samples, self.eval_projections, self.eval_w2_samples)):
+            raise ValueError("eval_samples, eval_projections, and eval_w2_samples must be positive integers")
 
 
 def _numpy(tensor):
@@ -157,7 +161,8 @@ def _summarize(rows):
         groups.setdefault((row["K0"], row["K1"], row["method"], row["L"]), []).append(row)
     summary = []
     metrics = ["transport_ms_mean", "map_setup_ms_mean", "map_apply_ms_mean", "pipeline_ms",
-               "cost_squared", "relative_cost_gap", "plan_rmse", "color_sw2", "guided_color_sw2"]
+               "cost_squared", "relative_cost_gap", "plan_rmse", "color_sw2", "guided_color_sw2",
+               "color_w2", "guided_color_w2"]
     for (_, _, method, count), group in groups.items():
         first = group[0]
         entry = {"method": method, "L": count, "K0": first["K0"], "K1": first["K1"],
@@ -247,7 +252,10 @@ def run_experiment(config):
         "distribution_projections": "Bonet et al. Gaussian ray laws: B at base N(0,I_3), "
                                     "B1D at base N(0,1), with full theta.T Sigma theta. "
                                     "Upstream revision: 5bb8a254f9c340a7a37af14218b7d6b06130e3d0.",
-        "color_evaluation": "Root SW2 on clipped float RGB before 8-bit PNG quantization",
+        "color_evaluation": "Root SW2 and exact empirical W2 on clipped float RGB before 8-bit "
+                            "PNG quantization. W2 uses POT emd2 and an equal-size prefix of the "
+                            "shared sampled source/target pixels; it is not the GMM MW2 cost. "
+                            "Evaluation is excluded from timed pipeline metrics.",
     }
     _write_json(output_dir / "metadata.json", metadata)
     all_rows = []
@@ -270,9 +278,13 @@ def run_experiment(config):
             synchronize(device)
             input_ms = 1000 * (time.perf_counter() - start)
             evaluator = ColorEvaluator.create(x, y, samples=config.eval_samples,
-                                              projections=config.eval_projections, seed=config.eval_seed + seed)
+                                              projections=config.eval_projections,
+                                              w2_samples=config.eval_w2_samples,
+                                              seed=config.eval_seed + seed)
             np.savez_compressed(folder / "evaluation_bank.npz", source_indices=evaluator.source_indices,
-                                target_indices=evaluator.target_indices, directions=evaluator.directions)
+                                target_indices=evaluator.target_indices, directions=evaluator.directions,
+                                w2_source_indices=evaluator.w2_source_indices,
+                                w2_target_indices=evaluator.w2_target_indices)
             outputs, guided_outputs, timing_rows = [], [], {}
             reference_plan, reference_cost, reference_output = None, None, None
             active_projection_seed = None
@@ -393,6 +405,8 @@ def run_experiment(config):
                     "map_rmse_to_mw2": float(np.sqrt(np.mean((mapped - reference_output) ** 2))),
                     "color_sw2": evaluator.sw2(mapped),
                     "guided_color_sw2": evaluator.sw2(filtered) if filtered is not None else None,
+                    "color_w2": evaluator.w2(mapped),
+                    "guided_color_w2": evaluator.w2(filtered) if filtered is not None else None,
                     "clipped_channel_fraction": float(np.mean((mapped < 0) | (mapped > 1))),
                 }
                 all_rows.append(row)
@@ -401,7 +415,8 @@ def run_experiment(config):
                 # Save after each method so a long run retains completed results.
                 _write_rows(output_dir / "metrics.csv", all_rows)
                 _write_json(folder / "timings.json", timing_rows)
-                print(f"  {display_name}: cost={cost:.6g}, transport={transport_mean:.2f} ms, color SW2={row['color_sw2']:.6g}", flush=True)
+                print(f"  {display_name}: cost={cost:.6g}, transport={transport_mean:.2f} ms, "
+                      f"color SW2={row['color_sw2']:.6g}, color W2={row['color_w2']:.6g}", flush=True)
             save_comparison(folder / "comparison.png", source_image, target_image, outputs)
             if guided_outputs:
                 save_comparison(folder / "comparison_guided.png", source_image, target_image, guided_outputs)
@@ -434,6 +449,8 @@ def build_parser(description=__doc__):
                         help="sweep projection seeds on each shared GMM; overrides projection_seed")
     parser.add_argument("--max-side", type=int)
     parser.add_argument("--fit-pixels", type=int)
+    parser.add_argument("--eval-w2-samples", type=int,
+                        help="number of sampled RGB pixels for exact empirical W2 evaluation")
     return parser
 
 
@@ -442,7 +459,7 @@ def config_from_arguments(args):
     values = json.loads(args.config.read_text(encoding="utf-8"))
     for key in ("source", "target", "output_dir", "device", "seeds", "max_side", "fit_pixels",
                 "aggregations", "projection_kinds", "opt_steps", "opt_samples",
-                "opt_epsilon", "opt_learning_rate"):
+                "opt_epsilon", "opt_learning_rate", "eval_w2_samples"):
         value = getattr(args, key)
         if value is not None:
             values[key] = value
