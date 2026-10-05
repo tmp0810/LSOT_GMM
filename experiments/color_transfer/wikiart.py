@@ -176,6 +176,8 @@ def main():
                         default=Path("results/color_transfer/wikiart"))
     parser.add_argument("--image-dir", type=Path,
                         default=Path("data/color_transfer/wikiart"))
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda", "cuda:0"),
+                        help="Override config device; use cpu if the Colab Torch wheel does not support its GPU")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--pair-indices", nargs="+", type=int)
     group.add_argument("--all-pairs", action="store_true")
@@ -195,6 +197,8 @@ def main():
     else:
         from .run import Config
         config = Config(**json.loads(args.config.read_text(encoding="utf-8")))
+        if args.device is not None:
+            config = replace(config, device=args.device)
     run_pairs(config, args.output_dir, args.image_dir, pair_indices=indices,
               download=not args.no_download, prepare_only=args.prepare_only,
               force_download=args.force_download, resume=not args.no_resume)

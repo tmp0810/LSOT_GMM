@@ -27,6 +27,11 @@ and target defines a different experiment.
 !python -m experiments.color_transfer.wikiart --output-dir results/color_transfer/wikiart
 ```
 
+If Colab reports `CUDA error: no kernel image is available for execution on
+the device`, its installed PyTorch wheel does not contain kernels for that
+GPU. Add `--device cpu` to the experiment command. Completed pairs are reused
+and an incomplete pair is recomputed automatically.
+
 The first preparation command downloads the selected paintings once into
 `data/color_transfer/wikiart/`; the experiment command checks and reuses that
 cache. The default config is
