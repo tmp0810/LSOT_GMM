@@ -103,3 +103,8 @@ An initial five-pair K=50, L=100 CPU run is documented in
 beside it. Re-running in Colab produces its own image outputs and summaries.
 The [full 19-pair run](wikiart_full_results.md) and its complete per-pair CSV
 are also committed.
+
+To test whether color SW2 improves as K increases, see
+[the WikiArt K sweep](wikiart_k_sweep.md): K=5/10/20/50/100/200, L=100,
+average/minimum LSOT across four projections and MW2, resumable pair/K runs
+and per-pair/per-method plots. No min-opt runs are enabled in that sweep.

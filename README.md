@@ -6,3 +6,6 @@ The [five-pair K=50, L=100 pilot results](docs/wikiart_pilot_results.md)
 include per-pair numerical comparisons against MW2.
 The [complete 19-pair K=50, L=100 comparison](docs/wikiart_full_results.md)
 contains every upstream pair and all thirteen methods.
+
+For K=5/10/20/50/100/200 with fixed L=100 and **avg/min LSOT + MW2**
+(nine methods), see [the resumable K-sweep and plotting guide](docs/wikiart_k_sweep.md).
