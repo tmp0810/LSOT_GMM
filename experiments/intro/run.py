@@ -28,7 +28,7 @@ from lsot.projections import PROJECTION_KINDS, sample_projection_bank
 
 TIMES_1D = (0.2, 0.5, 0.8)
 FAMILIES = tuple(PROJECTION_KINDS)
-MODES = ("avg", "min", "min-opt")
+MODES = ("avg", "min")
 
 
 def examples():
