@@ -1,4 +1,4 @@
-"""Compare MW2 with averaged, finite minimum, and optimized minimum LSOT.
+"""Compare MW2 with averaged, minimum, top-k, and optimized minimum LSOT.
 
 python -m experiments.color_transfer.run --config experiments/color_transfer/configs/smoke.json
 """
@@ -16,7 +16,8 @@ import numpy as np
 import torch
 from threadpoolctl import threadpool_limits
 
-from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, optimized_minimum_lsot, solve_mw2
+from lsot import (GMM, BarycentricMap, average_lsot, minimum_lsot, topk_lsot,
+                  optimized_minimum_lsot, solve_mw2)
 from lsot.projections import PROJECTION_KINDS, sample_projection_bank
 from .data import download_reference_images, fit_gmm, guided_output, read_rgb, save_rgb
 from .evaluation import ColorEvaluator, benchmark, save_comparison, synchronize, time_summary
@@ -77,8 +78,11 @@ class Config:
                 or not set(self.projection_kinds) <= set(PROJECTION_KINDS)):
             raise ValueError(f"projection_kinds must contain distinct values from {PROJECTION_KINDS}")
         if (not self.aggregations or len(set(self.aggregations)) != len(self.aggregations)
-                or not set(self.aggregations) <= {"avg", "min", "min-opt"}):
-            raise ValueError("aggregations must contain distinct values from 'avg', 'min', 'min-opt'")
+                or not set(self.aggregations) <= {"avg", "min", "min-opt", "top2", "top3", "top4"}):
+            raise ValueError("aggregations must contain distinct values from 'avg', 'min', 'min-opt', 'top2', 'top3', 'top4'")
+        if any(int(mode[-1]) > count for mode in self.aggregations if mode.startswith("top")
+               for count in self.projection_counts):
+            raise ValueError("each projection count must be at least the requested top-k")
         if (type(self.opt_steps) is not int or self.opt_steps < 0
                 or type(self.opt_samples) is not int or self.opt_samples < 1
                 or not np.isfinite([self.opt_epsilon, self.opt_learning_rate,
@@ -240,6 +244,9 @@ def run_experiment(config):
         "plan_reference": "MW2 component LP, not full distribution-space W2",
         "minimum_selection": "One lift for the entire GMM pair, minimizing true Gaussian W2-squared "
                              "cost over the shared finite bank. Zero-based index; first index on exact ties.",
+        "topk_selection": "Select the 2, 3, or 4 lifts with lowest true Gaussian squared cost "
+                          "from the same finite bank, then average their plans with equal weights. "
+                          "Exact cost ties use the earliest bank indices.",
         "optimized_selection": "Initialize from the minimum of the same L bank; use Gaussian-smoothed "
                                "Stein-gradient steps, retain the best actually evaluated lifted plan. "
                                "Optimization is heuristic and need not reach the global infimum.",
@@ -293,7 +300,8 @@ def run_experiment(config):
                 for count in sorted(set(config.projection_counts))
                 for aggregation in config.aggregations for kind in config.projection_kinds]
             for kind, count, aggregation, projection_seed in jobs:
-                prefix = {"avg": "", "min": "min-", "min-opt": "min-opt-"}
+                prefix = {"avg": "", "min": "min-", "min-opt": "min-opt-",
+                          "top2": "top2-", "top3": "top3-", "top4": "top4-"}
                 method = "MW2" if kind == "MW2" else f"{prefix[aggregation]}LSOT-{kind}"
                 name = method if count == 0 else f"{method}_L{count}"
                 method_folder = folder
@@ -325,6 +333,9 @@ def run_experiment(config):
                                 epsilon=config.opt_epsilon, learning_rate=config.opt_learning_rate,
                                 max_gradient_norm=config.opt_max_gradient_norm,
                                 seed=projection_seed + seed)
+                            return result.plan, float(result.cost_squared.item()), result
+                        if aggregation.startswith("top"):
+                            result = topk_lsot(source, target, selected_bank, kind, int(aggregation[-1]))
                             return result.plan, float(result.cost_squared.item()), result
                         plan = average_lsot(source, target, selected_bank, kind)
                         return plan, float(plan.cost(source, target).item()), None
@@ -363,6 +374,10 @@ def run_experiment(config):
                     np.savez_compressed(method_folder / f"{name}_selection.npz",
                                         projection_index=selection.projection_index,
                                         projection_costs=_numpy(selection.projection_costs))
+                elif aggregation is not None and aggregation.startswith("top"):
+                    np.savez_compressed(method_folder / f"{name}_selection.npz",
+                                        projection_indices=_numpy(selection.projection_indices),
+                                        projection_costs=_numpy(selection.projection_costs))
                 elif aggregation == "min-opt":
                     np.savez_compressed(
                         method_folder / f"{name}_selection.npz",
@@ -385,6 +400,8 @@ def run_experiment(config):
                     "projection_family": kind if kind != "MW2" else None,
                     "projection_bank": str((method_folder / bank_files[kind]).relative_to(folder)) if kind != "MW2" else None,
                     "selected_projection": selection.projection_index if aggregation == "min" else None,
+                    "selected_projections": (_numpy(selection.projection_indices).tolist()
+                                             if aggregation is not None and aggregation.startswith("top") else None),
                     "initial_projection": (selection.initial_projection_index if aggregation == "min-opt" else None),
                     "best_iteration": selection.best_iteration if aggregation == "min-opt" else None,
                     "solver_backend": "scipy+POT(cpu)" if kind == "MW2" else "torch",
@@ -438,7 +455,7 @@ def build_parser(description=__doc__):
     parser.add_argument("--projections", type=int, nargs="+")
     parser.add_argument("--projection-kinds", choices=PROJECTION_KINDS, nargs="+",
                         help="projection families; defaults to Mix SMix B B1D")
-    parser.add_argument("--aggregations", choices=["avg", "min", "min-opt"], nargs="+",
+    parser.add_argument("--aggregations", choices=["avg", "min", "min-opt", "top2", "top3", "top4"], nargs="+",
                         help="LSOT aggregation(s), overriding the config")
     parser.add_argument("--opt-steps", type=int, help="Stein-gradient updates per min-opt call")
     parser.add_argument("--opt-samples", type=int, help="Gaussian perturbations per update")

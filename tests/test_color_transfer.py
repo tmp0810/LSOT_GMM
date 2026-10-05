@@ -10,7 +10,7 @@ from experiments.color_transfer.evaluation import ColorEvaluator
 from experiments.color_transfer.run import Config, run_experiment
 from distribution_proj import BusemannBank, Busemann1DBank
 from param_proj import ProjectionBank, sample_projection_bank
-from lsot import GMM, average_lsot, minimum_lsot
+from lsot import GMM, average_lsot, minimum_lsot, topk_lsot
 
 
 def test_png_normalization_and_zero_displacement_filter(tmp_path):
@@ -31,6 +31,38 @@ def test_exact_empirical_rgb_w2_on_known_two_point_distributions():
     shifted = colors + np.array([0., 0.25, 0.])
     np.testing.assert_allclose(evaluator.w2(shifted), 0.25, atol=1e-14)
     np.testing.assert_array_equal(evaluator.w2_source_indices, evaluator.source_indices)
+
+
+def test_topk_color_transfer_reuses_same_bank_and_saves_selected_plans(tmp_path):
+    rng = np.random.default_rng(21)
+    source, target = tmp_path / "source.png", tmp_path / "target.png"
+    Image.fromarray(rng.integers(0, 256, size=(10, 11, 3), dtype=np.uint8)).save(source)
+    Image.fromarray(rng.integers(0, 256, size=(11, 10, 3), dtype=np.uint8)).save(target)
+    config = Config(source=str(source), target=str(target), download_reference=False,
+                    output_dir=str(tmp_path / "out"), components_source=3, components_target=3,
+                    projection_counts=[4], projection_kinds=["Mix"],
+                    aggregations=["min", "top2", "top3", "top4"], seeds=[0],
+                    device="cpu", repeats=1, warmups=0, map_repeats=1,
+                    guided_filter=False, eval_samples=32, eval_projections=5, eval_w2_samples=8)
+    rows = run_experiment(config)
+    assert len(rows) == 5
+    gmms = np.load(tmp_path / "out/seed_0/gmms.npz")
+    left = GMM.from_numpy(gmms["alpha"], gmms["means_source"], gmms["covariances_source"])
+    right = GMM.from_numpy(gmms["beta"], gmms["means_target"], gmms["covariances_target"])
+    saved = np.load(tmp_path / "out/seed_0/projection_bank.npz")
+    bank = ProjectionBank(**{key: torch.tensor(saved[key]) for key in saved.files})
+    for count in (2, 3, 4):
+        row = next(r for r in rows if r["aggregation"] == f"top{count}")
+        result = topk_lsot(left, right, bank, "Mix", count)
+        selection = np.load(tmp_path / "out/seed_0" / f"top{count}-LSOT-Mix_L4_selection.npz")
+        plan = np.load(tmp_path / "out/seed_0" / f"top{count}-LSOT-Mix_L4_plan.npz")
+        np.testing.assert_array_equal(selection["projection_indices"], row["selected_projections"])
+        np.testing.assert_allclose(result.plan.dense().numpy()[plan["rows"], plan["cols"]], plan["mass"])
+        np.testing.assert_allclose(row["cost_squared"], result.cost_squared.item())
+        assert np.isfinite(row["color_sw2"]) and np.isfinite(row["color_w2"])
+    costs = [next(r for r in rows if r["aggregation"] == aggregation)["cost_squared"]
+             for aggregation in ("min", "top2", "top3", "top4")]
+    assert all(a <= b + 1e-12 for a, b in zip(costs, costs[1:]))
 
 
 @pytest.mark.parametrize("count", [0, -1, 1.5])

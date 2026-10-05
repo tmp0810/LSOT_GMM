@@ -5,11 +5,12 @@ import scipy.linalg
 import torch
 
 import gmmot
-from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, solve_mw2
+from lsot import GMM, BarycentricMap, average_lsot, minimum_lsot, topk_lsot, solve_mw2
 from lsot.gaussians import gaussian_pair_costs
 from lsot.maps import gaussian_pair_maps
 from lsot.projections import sample_projection_bank as sample_lsot_bank, project_gaussians as project_lsot_gaussians
-from lsot.plans import average_projected_plans, lift_projection, minimum_projected_plan, SparsePlan
+from lsot.plans import (average_projected_plans, lift_projection, minimum_projected_plan,
+                        topk_projected_plan, SparsePlan)
 from param_proj import ProjectionBank, sample_projection_bank, project_gaussians
 from param_proj.sot_gms import MixSW, SMixW
 from param_proj.sw import one_dimensional_Wasserstein
@@ -229,6 +230,38 @@ def test_minimum_exact_cost_tie_selects_first_and_preserves_fiber_rule():
     assert result.projection_index == 0
     torch.testing.assert_close(result.projection_costs, result.projection_costs[0].expand(3), atol=0, rtol=0)
     torch.testing.assert_close(result.plan.dense(), torch.outer(source.weights, target.weights))
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 4])
+def test_topk_lifts_match_independent_dense_reference(k):
+    source, target = make_gmm(k=5, seed=10), make_gmm(k=7, seed=15)
+    bank = sample_lsot_bank(3, 7, kind="Mix", seed=20)
+    x = project_lsot_gaussians(source.means, source.covariances, bank, "Mix")
+    y = project_lsot_gaussians(target.means, target.covariances, bank, "Mix")
+    # Include an exact projection collision to check that the original fiber rule is retained.
+    x[:, 0], y[:, 0] = 0, 0
+    result = topk_projected_plan(x, y, source, target, k)
+    lifted = np.stack([dense_reference_lift(x[:, ell].numpy(), y[:, ell].numpy(),
+                       source.weights.numpy(), target.weights.numpy()) for ell in range(bank.count)])
+    ground = np.array([[gmmot.GaussianW2(source.means[i].numpy(), target.means[j].numpy(),
+                        source.covariances[i].numpy(), target.covariances[j].numpy())
+                       for j in range(target.count)] for i in range(source.count)])
+    costs = (lifted * ground).sum(axis=(1, 2))
+    selected = np.argsort(costs, kind="stable")[:k]
+    np.testing.assert_array_equal(result.projection_indices.numpy(), selected)
+    np.testing.assert_allclose(result.plan.dense().numpy(), lifted[selected].mean(axis=0), atol=3e-15)
+    np.testing.assert_allclose(result.cost_squared.item(), costs[selected].mean(), atol=2e-12)
+    assert result.plan.marginal_error(source, target) < 1e-14
+    if k == 1:
+        torch.testing.assert_close(topk_lsot(source, target, bank, "Mix", 1).plan.dense(),
+                                   minimum_lsot(source, target, bank, "Mix").plan.dense())
+
+
+def test_topk_rejects_invalid_selection_count():
+    source, target = make_gmm(seed=4), make_gmm(seed=5)
+    bank = sample_lsot_bank(3, 3, kind="Mix", seed=6)
+    with pytest.raises(ValueError, match="bank size"):
+        topk_lsot(source, target, bank, "Mix", 4)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")

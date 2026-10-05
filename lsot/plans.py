@@ -173,6 +173,42 @@ def minimum_lsot(source, target, bank, kind):
     return minimum_projected_plan(x, y, source, target)
 
 
+@dataclass(frozen=True)
+class TopKLSOTResult:
+    """Uniform mixture of the k cheapest lifts in one shared projection bank."""
+    plan: SparsePlan
+    cost_squared: torch.Tensor
+    projection_indices: torch.Tensor
+    projection_costs: torch.Tensor
+
+
+def topk_projected_plan(x, y, source, target, k):
+    """Rank lifts by Gaussian ground cost and average the best k plans.
+
+    The selected projections are sorted by cost, breaking exact ties by
+    their original bank index. Each lift has full unit mass and the same
+    marginals, so their uniform mixture is another admissible plan.
+    """
+    if type(k) is not int or k < 1 or k > x.shape[1]:
+        raise ValueError("k must be an integer between 1 and the bank size")
+    directions, rows, cols, mass = _projected_plan_entries(x, y, source.weights, target.weights)
+    pairs, inverse = torch.unique(rows * target.count + cols, return_inverse=True)
+    pair_costs = gaussian_pair_costs(source, target, pairs // target.count, pairs % target.count)
+    costs = mass.new_zeros(x.shape[1]).scatter_add_(0, directions, mass * pair_costs[inverse])
+    selected = torch.argsort(costs, stable=True)[:k]
+    keep = torch.isin(directions, selected)
+    plan = SparsePlan.from_entries(rows[keep], cols[keep], mass[keep] / k,
+                                   (source.count, target.count))
+    return TopKLSOTResult(plan, costs[selected].mean(), selected, costs)
+
+
+def topk_lsot(source, target, bank, kind, k):
+    """Return the average of the k cheapest lifts in a finite bank."""
+    x = project_gaussians(source.means, source.covariances, bank, kind)
+    y = project_gaussians(target.means, target.covariances, bank, kind)
+    return topk_projected_plan(x, y, source, target, k)
+
+
 def solve_mw2(source, target):
     """Run the preserved gmmot.GW2 baseline (SciPy/POT on CPU).
 
