@@ -37,3 +37,16 @@
 Image assets are downloaded on demand from the upstream repository and
 verified against the Git blob hashes reviewed for this implementation.
 No new license is asserted for upstream or previously supplied material.
+
+The optional WikiArt color-transfer experiment uses the painting URL list and
+19 ordered pairs from the user's
+[Sliced-Amortized-OT repository](https://github.com/tmp0810/Sliced-Amortized-OT/tree/main/data_color_transfer)
+at revision `59234586542d905d951eae1af7b03566733e528f`. Those two text
+manifests are copied under `experiments/color_transfer/wikiart/`; the paintings
+themselves are downloaded on demand from their listed WikiArt pages, kept in
+the ignored `data/` directory and retain their original page URLs and hashes
+in the local result manifest. The paintings are not bundled with this repo.
+One upstream WikiArt page (`cheerful-forms-1914`) now returns 404, so the
+downloader falls back explicitly to a
+[Wikimedia Commons file of the same Franz Marc artwork](https://commons.wikimedia.org/wiki/File:Marc_-_Cheerful_Forms,_1914,_Hoberg,_Jansen_237.jpg).
+The source URL and converted image hash are recorded for that fallback.

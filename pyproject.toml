@@ -25,7 +25,7 @@ py-modules = ["gmmot"]
 include = ["lsot*", "param_proj*", "distribution_proj*", "experiments*"]
 
 [tool.setuptools.package-data]
-"experiments.color_transfer" = ["configs/*.json"]
+"experiments.color_transfer" = ["configs/*.json", "wikiart/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,6 +6,11 @@ pixels** and the original target RGB pixels. Both images are clipped to
 They are pixel-level evaluation measures; neither is the Gaussian-mixture
 component cost reported in `cost_squared`.
 
+The individual-run `metrics.csv` also records `identity_color_sw2` and
+`identity_color_w2`: the same evaluation on the unchanged source image, using
+the same source/target pixel indices and directions. This makes it possible
+to distinguish improvement over the starting colors from agreement with MW2.
+
 * `color_sw2` is the root sliced Wasserstein-2 distance on the common sampled
   pixels and `eval_projections` fixed evaluation directions.
 * `color_w2` is the exact, unregularized empirical Wasserstein-2 distance

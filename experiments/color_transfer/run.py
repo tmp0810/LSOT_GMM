@@ -166,7 +166,7 @@ def _summarize(rows):
     summary = []
     metrics = ["transport_ms_mean", "map_setup_ms_mean", "map_apply_ms_mean", "pipeline_ms",
                "cost_squared", "relative_cost_gap", "plan_rmse", "color_sw2", "guided_color_sw2",
-               "color_w2", "guided_color_w2"]
+               "color_w2", "guided_color_w2", "identity_color_sw2", "identity_color_w2"]
     for (_, _, method, count), group in groups.items():
         first = group[0]
         entry = {"method": method, "L": count, "K0": first["K0"], "K1": first["K1"],
@@ -288,6 +288,8 @@ def run_experiment(config):
                                               projections=config.eval_projections,
                                               w2_samples=config.eval_w2_samples,
                                               seed=config.eval_seed + seed)
+            identity_color_sw2 = evaluator.sw2(source_image)
+            identity_color_w2 = evaluator.w2(source_image)
             np.savez_compressed(folder / "evaluation_bank.npz", source_indices=evaluator.source_indices,
                                 target_indices=evaluator.target_indices, directions=evaluator.directions,
                                 w2_source_indices=evaluator.w2_source_indices,
@@ -421,6 +423,8 @@ def run_experiment(config):
                     "marginal_l1_error": marginal_error,
                     "map_rmse_to_mw2": float(np.sqrt(np.mean((mapped - reference_output) ** 2))),
                     "color_sw2": evaluator.sw2(mapped),
+                    "identity_color_sw2": identity_color_sw2,
+                    "identity_color_w2": identity_color_w2,
                     "guided_color_sw2": evaluator.sw2(filtered) if filtered is not None else None,
                     "color_w2": evaluator.w2(mapped),
                     "guided_color_w2": evaluator.w2(filtered) if filtered is not None else None,

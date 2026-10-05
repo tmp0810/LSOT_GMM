@@ -1,0 +1,484 @@
+{
+  "upstream_repo": "https://github.com/tmp0810/Sliced-Amortized-OT",
+  "upstream_revision": "59234586542d905d951eae1af7b03566733e528f",
+  "upstream_pair_file": "data_color_transfer/paintings/pairs.txt",
+  "upstream_url_file": "data_color_transfer/wikiart-urls.txt",
+  "pairs": [
+    {
+      "index": 0,
+      "source": "market-in-algiers",
+      "target": "argenteuil-the-seine",
+      "directory": "pair_00_market-in-algiers__argenteuil-the-seine"
+    },
+    {
+      "index": 1,
+      "source": "distant-view-of-the-pyramids-1921",
+      "target": "october-sundown-newport-1901",
+      "directory": "pair_01_distant-view-of-the-pyramids-1921__october-sundown-newport-1901"
+    },
+    {
+      "index": 2,
+      "source": "fuji-mountains-in-clear-weather-1831",
+      "target": "distant-view-of-the-pyramids-1921",
+      "directory": "pair_02_fuji-mountains-in-clear-weather-1831__distant-view-of-the-pyramids-1921"
+    },
+    {
+      "index": 3,
+      "source": "breakup-of-ice",
+      "target": "senecio-1922",
+      "directory": "pair_03_breakup-of-ice__senecio-1922"
+    },
+    {
+      "index": 4,
+      "source": "distant-view-of-the-pyramids-1921",
+      "target": "charing-cross-bridge-overcast-weather",
+      "directory": "pair_04_distant-view-of-the-pyramids-1921__charing-cross-bridge-overcast-weather"
+    },
+    {
+      "index": 5,
+      "source": "haystacks-at-giverny",
+      "target": "argenteuil",
+      "directory": "pair_05_haystacks-at-giverny__argenteuil"
+    },
+    {
+      "index": 6,
+      "source": "houses-of-parliament",
+      "target": "october-sundown-newport-1901",
+      "directory": "pair_06_houses-of-parliament__october-sundown-newport-1901"
+    },
+    {
+      "index": 7,
+      "source": "landscape-with-house-at-ceret-1913",
+      "target": "irises-in-monet-s-garden-03",
+      "directory": "pair_07_landscape-with-house-at-ceret-1913__irises-in-monet-s-garden-03"
+    },
+    {
+      "index": 8,
+      "source": "photograph-of-violin-and-checkerboard-1913",
+      "target": "celia-thaxter-s-garden-appledore-isles-of-shoals",
+      "directory": "pair_08_photograph-of-violin-and-checkerboard-1913__celia-thaxter-s-garden-appledore-isles-of-shoals"
+    },
+    {
+      "index": 9,
+      "source": "crystal-1921",
+      "target": "senecio-1922",
+      "directory": "pair_09_crystal-1921__senecio-1922"
+    },
+    {
+      "index": 10,
+      "source": "vaza-s-kvetinami-1914",
+      "target": "sower-with-setting-sun-1888-3",
+      "directory": "pair_10_vaza-s-kvetinami-1914__sower-with-setting-sun-1888-3"
+    },
+    {
+      "index": 11,
+      "source": "a-man-in-a-cafe-1914",
+      "target": "rio-dell-angelo-1902",
+      "directory": "pair_11_a-man-in-a-cafe-1914__rio-dell-angelo-1902"
+    },
+    {
+      "index": 12,
+      "source": "three-trees-in-grey-weather",
+      "target": "vase-with-daisies-and-anemones-1887",
+      "directory": "pair_12_three-trees-in-grey-weather__vase-with-daisies-and-anemones-1887"
+    },
+    {
+      "index": 13,
+      "source": "irises-1889",
+      "target": "portrait-of-ambroise-vollard-1910",
+      "directory": "pair_13_irises-1889__portrait-of-ambroise-vollard-1910"
+    },
+    {
+      "index": 14,
+      "source": "red-vineyards-at-arles-1888",
+      "target": "the-seine-at-vetheuil",
+      "directory": "pair_14_red-vineyards-at-arles-1888__the-seine-at-vetheuil"
+    },
+    {
+      "index": 15,
+      "source": "irises-in-monet-s-garden-03",
+      "target": "sower-with-setting-sun-1888-3",
+      "directory": "pair_15_irises-in-monet-s-garden-03__sower-with-setting-sun-1888-3"
+    },
+    {
+      "index": 16,
+      "source": "photograph-of-violin-and-checkerboard-1913",
+      "target": "interno-di-san-miniato-1861",
+      "directory": "pair_16_photograph-of-violin-and-checkerboard-1913__interno-di-san-miniato-1861"
+    },
+    {
+      "index": 17,
+      "source": "grapes-1913",
+      "target": "landscape-with-house-at-ceret-1913",
+      "directory": "pair_17_grapes-1913__landscape-with-house-at-ceret-1913"
+    },
+    {
+      "index": 18,
+      "source": "the-seine-at-vetheuil-2",
+      "target": "cheerful-forms-1914",
+      "directory": "pair_18_the-seine-at-vetheuil-2__cheerful-forms-1914"
+    }
+  ],
+  "images": {
+    "market-in-algiers": {
+      "page_url": "https://www.wikiart.org/en/august-macke/market-in-algiers",
+      "download_page_url": "https://www.wikiart.org/en/august-macke/market-in-algiers",
+      "image_url": "https://uploads1.wikiart.org/images/august-macke/market-in-algiers.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "96e53da64ad585d74ae5eb4742e750e7f1439387b23d8ad76e25ae073a7aa3e6",
+      "sha256": "ae9e922fe7fe14bca476f67b8377e463768ef071d2e46e15517fde85bc444eb5",
+      "size": [
+        467,
+        600
+      ]
+    },
+    "argenteuil-the-seine": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/argenteuil-the-seine",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/argenteuil-the-seine",
+      "image_url": "https://uploads7.wikiart.org/images/claude-monet/argenteuil-the-seine(1).jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "792e86771ba6c93ece81b01c7c3f3220aed632610eb3acbdb0ab00b87feeeb65",
+      "sha256": "ac32a5e9517f54bf33b6bf1b2258c8cd6c681853bd222b2844a882d9ac8ce143",
+      "size": [
+        741,
+        600
+      ]
+    },
+    "distant-view-of-the-pyramids-1921": {
+      "page_url": "https://www.wikiart.org/en/winston-churchill/distant-view-of-the-pyramids-1921",
+      "download_page_url": "https://www.wikiart.org/en/winston-churchill/distant-view-of-the-pyramids-1921",
+      "image_url": "https://uploads6.wikiart.org/images/winston-churchill/distant-view-of-the-pyramids-1921(1).jpg",
+      "used_fallback": false,
+      "download_sha256": "0d4bed6282bc6bfdab260d3de6f2ba45a5aedf98e474f1a0c2f649abf4033d4c",
+      "sha256": "4c3409f922cb8bf85cf120d5d7ab85bdd82706b725c3cc28903f640c6b22a2ce",
+      "size": [
+        500,
+        399
+      ]
+    },
+    "october-sundown-newport-1901": {
+      "page_url": "https://www.wikiart.org/en/childe-hassam/october-sundown-newport-1901",
+      "download_page_url": "https://www.wikiart.org/en/childe-hassam/october-sundown-newport-1901",
+      "image_url": "https://uploads4.wikiart.org/images/childe-hassam/october-sundown-newport-1901.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "d6af9bb96c1987facb201f17d67adca47848b293fddfe87100d6779fe470c00e",
+      "sha256": "bc25b31ac45bfca846673db5827e4ca11beb19a5530a2026203f2bc78f4c60df",
+      "size": [
+        554,
+        600
+      ]
+    },
+    "fuji-mountains-in-clear-weather-1831": {
+      "page_url": "https://www.wikiart.org/en/katsushika-hokusai/fuji-mountains-in-clear-weather-1831",
+      "download_page_url": "https://www.wikiart.org/en/katsushika-hokusai/fuji-mountains-in-clear-weather-1831",
+      "image_url": "https://uploads8.wikiart.org/images/katsushika-hokusai/fuji-mountains-in-clear-weather-1831.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "3b307aa8c5629759bf222766755874015b023bb3b4fba7e835de95e5860e2213",
+      "sha256": "1105e4d04f7dceeb3f126d2e1fd28ba09582f5145c9c016cd188b6f166594e8f",
+      "size": [
+        750,
+        501
+      ]
+    },
+    "breakup-of-ice": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/breakup-of-ice",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/breakup-of-ice",
+      "image_url": "https://uploads7.wikiart.org/images/claude-monet/breakup-of-ice.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "b87d29ee8179657acd98d8c0e62bfad017923aa4807404fb1bdfd19304fe759f",
+      "sha256": "2570c74dd3fd1c733e24ab50cc6a22c4bc4dc77a37c7a9035e243a18a43dd457",
+      "size": [
+        750,
+        552
+      ]
+    },
+    "senecio-1922": {
+      "page_url": "https://www.wikiart.org/en/paul-klee/senecio-1922",
+      "download_page_url": "https://www.wikiart.org/en/paul-klee/senecio-1922",
+      "image_url": "https://uploads5.wikiart.org/images/paul-klee/senecio-1922(1).jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "8d5b47236547304bade4c4e848d9d1a5dee473a00308328e1a50e940abac1847",
+      "sha256": "3c8f3f48ee0becf1b9e5eaddf382e83741aa69bf33c4fb1acdd121763f058263",
+      "size": [
+        548,
+        600
+      ]
+    },
+    "charing-cross-bridge-overcast-weather": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/charing-cross-bridge-overcast-weather",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/charing-cross-bridge-overcast-weather",
+      "image_url": "https://uploads3.wikiart.org/images/claude-monet/charing-cross-bridge-overcast-weather.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "5e49582f7a3d705dafdc2954a8c8f5fcc771581388f5175d95b6d875a9c6b3a6",
+      "sha256": "e746e508e996766ac414e2ae02394c54cc59e65df97c6cb5cda3f4aec7dfd64e",
+      "size": [
+        750,
+        511
+      ]
+    },
+    "haystacks-at-giverny": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/haystacks-at-giverny",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/haystacks-at-giverny",
+      "image_url": "https://uploads4.wikiart.org/images/claude-monet/haystacks-at-giverny.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "28f24377a4e8fa760797c580e2bf2aa8c733b54f93ea181c30c65fa1ca9338f8",
+      "sha256": "ec34e8756d9be6c5c22bbd80c29cda9e946bb49391c580fd5fc51c6ecb4aee62",
+      "size": [
+        750,
+        598
+      ]
+    },
+    "argenteuil": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/argenteuil",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/argenteuil",
+      "image_url": "https://uploads6.wikiart.org/images/claude-monet/argenteuil(1).jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "a363e67906722e60f9778673a87fea1661533b3df182e470bd14146a8acdd96f",
+      "sha256": "bb155c3d11d375776d254b53a42eaee5d4bcaba88c6e88c0c4fc8a04390d6686",
+      "size": [
+        750,
+        573
+      ]
+    },
+    "houses-of-parliament": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/houses-of-parliament",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/houses-of-parliament",
+      "image_url": "https://uploads4.wikiart.org/images/claude-monet/houses-of-parliament.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "e25d9720feeaef79f847a15d2d8029fe0b07ee8d2c8919652e103019ecfb291a",
+      "sha256": "1cdf83859b63f4b72ef5166fb53f76c5de31432997092a2414840a997f7f2a39",
+      "size": [
+        688,
+        600
+      ]
+    },
+    "landscape-with-house-at-ceret-1913": {
+      "page_url": "https://www.wikiart.org/en/juan-gris/landscape-with-house-at-ceret-1913",
+      "download_page_url": "https://www.wikiart.org/en/juan-gris/landscape-with-house-at-ceret-1913",
+      "image_url": "https://uploads6.wikiart.org/images/juan-gris/landscape-with-house-at-ceret-1913.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "da75c3ae9663a99b4dbdae3be87db354d6bf71ec5b08b7a002a29ddb0eabc8e3",
+      "sha256": "1ad32849775b9f783378cc5eb5e77b87025c668ddb9a32a283e12391d775a048",
+      "size": [
+        382,
+        600
+      ]
+    },
+    "irises-in-monet-s-garden-03": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/irises-in-monet-s-garden-03",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/irises-in-monet-s-garden-03",
+      "image_url": "https://uploads4.wikiart.org/00254/images/claude-monet/claude-monet-irises-in-monets-garden-1899-1900.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "12e672fe29458509a56f13220d49893650729c7e3d3fd1df2fffc867a3a5aba0",
+      "sha256": "be3de71ecde60c0ddf904d55d5238ba657417bdb1fe01b906b03ff27fda7e2c6",
+      "size": [
+        720,
+        600
+      ]
+    },
+    "photograph-of-violin-and-checkerboard-1913": {
+      "page_url": "https://www.wikiart.org/en/juan-gris/photograph-of-violin-and-checkerboard-1913",
+      "download_page_url": "https://www.wikiart.org/en/juan-gris/photograph-of-violin-and-checkerboard-1913",
+      "image_url": "https://uploads5.wikiart.org/images/juan-gris/photograph-of-violin-and-checkerboard-1913.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "425cdfc7e74ccbb66fd590a83d9ddf5388792b6be77363cf28af9594d328aac3",
+      "sha256": "deb2fb6d319fa15b787f05ce0a3fedef9e39a3a85cebd7e67a5eb6e2231bf46a",
+      "size": [
+        389,
+        600
+      ]
+    },
+    "celia-thaxter-s-garden-appledore-isles-of-shoals": {
+      "page_url": "https://www.wikiart.org/en/childe-hassam/celia-thaxter-s-garden-appledore-isles-of-shoals",
+      "download_page_url": "https://www.wikiart.org/en/childe-hassam/celia-thaxter-s-garden-appledore-isles-of-shoals",
+      "image_url": "https://uploads6.wikiart.org/images/childe-hassam/celia-thaxter-s-garden-appledore-isles-of-shoals.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "8355f2c07c309c60f913246217cf08eeec916959b10042130472449bf45ac217",
+      "sha256": "b020ce729fd12426675031e750165ef1f2638176ee196af2c81189d934ab76d3",
+      "size": [
+        428,
+        600
+      ]
+    },
+    "crystal-1921": {
+      "page_url": "https://www.wikiart.org/en/paul-klee/crystal-1921",
+      "download_page_url": "https://www.wikiart.org/en/paul-klee/crystal-1921",
+      "image_url": "https://uploads5.wikiart.org/images/paul-klee/crystal-1921(1).jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "b0cac2eb84ddf2e2545371b5445ab14b1503e8ff93154d063ca466dd5e4e10a6",
+      "sha256": "6354a0f6458ef30d04f0377b45141190bc2f5dd0db07b49914726e39971ef6ee",
+      "size": [
+        461,
+        600
+      ]
+    },
+    "vaza-s-kvetinami-1914": {
+      "page_url": "https://www.wikiart.org/en/josef-capek/vaza-s-kvetinami-1914",
+      "download_page_url": "https://www.wikiart.org/en/josef-capek/vaza-s-kvetinami-1914",
+      "image_url": "https://uploads1.wikiart.org/00308/images/josef-capek/josef-apek-v-za-s-kv-tinami-1914.jpg",
+      "used_fallback": false,
+      "download_sha256": "2dd0be7b9a2445c150d53b4a93be6105beb069696327f5ee74c52e31e8dfbb03",
+      "sha256": "be2f1550eb26cb8499303b016b4027efcdba4ce004c915aa773ae609ed939887",
+      "size": [
+        407,
+        589
+      ]
+    },
+    "sower-with-setting-sun-1888-3": {
+      "page_url": "https://www.wikiart.org/en/vincent-van-gogh/sower-with-setting-sun-1888-3",
+      "download_page_url": "https://www.wikiart.org/en/vincent-van-gogh/sower-with-setting-sun-1888-3",
+      "image_url": "https://uploads8.wikiart.org/images/vincent-van-gogh/sower-with-setting-sun-1888-3.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "52a861f4233179fe7388880057be45d81d306ae4580eedd2893a78ef7deab8f7",
+      "sha256": "45c722a282b2bdcb69c91621bc7f8c08a3a5711177f8fc3960bd84b3e139a7f5",
+      "size": [
+        744,
+        600
+      ]
+    },
+    "a-man-in-a-cafe-1914": {
+      "page_url": "https://www.wikiart.org/en/juan-gris/a-man-in-a-cafe-1914",
+      "download_page_url": "https://www.wikiart.org/en/juan-gris/a-man-in-a-cafe-1914",
+      "image_url": "https://uploads1.wikiart.org/images/juan-gris/a-man-in-a-cafe-1914.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "a41e73b842dbe67176797e6ecabe3a301f8633779b2ba9f7efc35cf9b2236406",
+      "sha256": "83c38f78083a3556c6e0e56a735eade209ef10cb219e61b2a2d8171fe52108e6",
+      "size": [
+        424,
+        600
+      ]
+    },
+    "rio-dell-angelo-1902": {
+      "page_url": "https://www.wikiart.org/en/john-singer-sargent/rio-dell-angelo-1902",
+      "download_page_url": "https://www.wikiart.org/en/john-singer-sargent/rio-dell-angelo-1902",
+      "image_url": "https://uploads2.wikiart.org/images/john-singer-sargent/rio-dell-angelo-1902.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "2de9618630252071f3b41f62c7d5145cca495bbe2382cc1b3f1db0d5dd52a665",
+      "sha256": "e439691244f5f4b3b3568e45fa63ef3b953417429f4a9219589ec6bcf18737de",
+      "size": [
+        750,
+        529
+      ]
+    },
+    "three-trees-in-grey-weather": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/three-trees-in-grey-weather",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/three-trees-in-grey-weather",
+      "image_url": "https://uploads2.wikiart.org/images/claude-monet/three-trees-in-grey-weather.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "a3e76aa78abe1287335fcd1c06dacded5485962b602c2bcb07c13effde10d290",
+      "sha256": "23549fdbdce62dcf67689a29874af2218094972e4cef6f833ae8a71655ec4847",
+      "size": [
+        473,
+        600
+      ]
+    },
+    "vase-with-daisies-and-anemones-1887": {
+      "page_url": "https://www.wikiart.org/en/vincent-van-gogh/vase-with-daisies-and-anemones-1887",
+      "download_page_url": "https://www.wikiart.org/en/vincent-van-gogh/vase-with-daisies-and-anemones-1887",
+      "image_url": "https://uploads5.wikiart.org/images/vincent-van-gogh/vase-with-daisies-and-anemones-1887.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "4d2e2c116140afa66a33c900449b3ce06d848bfc8e09601808a57f67b0e4c611",
+      "sha256": "43cc589c2a56c8b10e65af5bfd0f6ff4bd9c73867f945bccc9a0590853ac1c01",
+      "size": [
+        399,
+        600
+      ]
+    },
+    "irises-1889": {
+      "page_url": "https://www.wikiart.org/en/vincent-van-gogh/irises-1889",
+      "download_page_url": "https://www.wikiart.org/en/vincent-van-gogh/irises-1889",
+      "image_url": "https://uploads0.wikiart.org/00213/images/vincent-van-gogh/antique-3840759.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "421a123a0310b40a4c8861fafe01af1f9512c659a4bfaa1273a81d94df1922b4",
+      "sha256": "7a8559b481d2a0591edffb19686942478f92341c15e9bbcd46a2ee6856ce6100",
+      "size": [
+        750,
+        589
+      ]
+    },
+    "portrait-of-ambroise-vollard-1910": {
+      "page_url": "https://www.wikiart.org/en/pablo-picasso/portrait-of-ambroise-vollard-1910",
+      "download_page_url": "https://www.wikiart.org/en/pablo-picasso/portrait-of-ambroise-vollard-1910",
+      "image_url": "https://uploads0.wikiart.org/images/pablo-picasso/portrait-of-ambroise-vollard-1910.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "240bd3d3b9cd018a92cea51ff7238c417ae84ea4608b99bceb1db5224481eff1",
+      "sha256": "22afcfebad245172da9562c07fc06b0a29e6f797753d49a4650be71eee388019",
+      "size": [
+        411,
+        600
+      ]
+    },
+    "red-vineyards-at-arles-1888": {
+      "page_url": "https://www.wikiart.org/en/vincent-van-gogh/red-vineyards-at-arles-1888",
+      "download_page_url": "https://www.wikiart.org/en/vincent-van-gogh/red-vineyards-at-arles-1888",
+      "image_url": "https://uploads6.wikiart.org/images/vincent-van-gogh/red-vineyards-at-arles-1888.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "02d76160eb4b602ac9e9847dffe620ae28da109ce0033da80cfbeb8cf3b83373",
+      "sha256": "fadb96b790d02bdce9c05fd3e076a97ffd8a1ef60ae9c686d4f6bdf6b0e8888c",
+      "size": [
+        750,
+        585
+      ]
+    },
+    "the-seine-at-vetheuil": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/the-seine-at-vetheuil",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/the-seine-at-vetheuil",
+      "image_url": "https://uploads5.wikiart.org/images/claude-monet/the-seine-at-vetheuil.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "25fff016dc48bff5732bb17218017589781b060a7b0a7a00083dbf90e58deddb",
+      "sha256": "9c5f81ecab8e0eae32e7fcbb9819091e5a27a70d685e1dd2171462246b3e56a1",
+      "size": [
+        442,
+        600
+      ]
+    },
+    "interno-di-san-miniato-1861": {
+      "page_url": "https://www.wikiart.org/en/telemaco-signorini/interno-di-san-miniato-1861",
+      "download_page_url": "https://www.wikiart.org/en/telemaco-signorini/interno-di-san-miniato-1861",
+      "image_url": "https://uploads5.wikiart.org/00239/images/telemaco-signorini/telemaco-signorini-interno-di-san-miniato-1861-circa-47x36-cm.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "a52aaedf6c224aa5abb90223e9a5a0f98521a47b8d015a1c10c3227d11b323c1",
+      "sha256": "39b1586430d8b7de58ac66ff5386b345e54539b7306f75574ccb7cc625be766a",
+      "size": [
+        440,
+        600
+      ]
+    },
+    "grapes-1913": {
+      "page_url": "https://www.wikiart.org/en/juan-gris/grapes-1913",
+      "download_page_url": "https://www.wikiart.org/en/juan-gris/grapes-1913",
+      "image_url": "https://uploads1.wikiart.org/images/juan-gris/grapes-1913.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "233ed88e9795d39ffefeec4dfe16ac98161239f004d92cdf44c3898afee10910",
+      "sha256": "8fd66067c80f8b0cb29ad68debe9cfe27f5497dd96c217c7c77c8ab55f48d07c",
+      "size": [
+        403,
+        600
+      ]
+    },
+    "the-seine-at-vetheuil-2": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/the-seine-at-vetheuil-2",
+      "download_page_url": "https://www.wikiart.org/en/claude-monet/the-seine-at-vetheuil-2",
+      "image_url": "https://uploads7.wikiart.org/images/claude-monet/the-seine-at-vetheuil-2.jpg!Large.jpg",
+      "used_fallback": false,
+      "download_sha256": "24926c952465901d6c0120087342857041343eb8587e615c2c156c9b9828d17f",
+      "sha256": "eb30d5325fbfad9736fe6c0f78b600152401cfa0c2f034dbba14c85a65dfc49d",
+      "size": [
+        750,
+        550
+      ]
+    },
+    "cheerful-forms-1914": {
+      "page_url": "https://www.wikiart.org/en/franz-marc/cheerful-forms-1914",
+      "download_page_url": "https://commons.wikimedia.org/wiki/File:Marc_-_Cheerful_Forms,_1914,_Hoberg,_Jansen_237.jpg",
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/9/92/Marc_-_Cheerful_Forms%2C_1914%2C_Hoberg%2C_Jansen_237.jpg",
+      "used_fallback": true,
+      "download_sha256": "ef56dd4770a61cfab0133b4eaa3ce771676b484075ac97ebf50c1436e5e25583",
+      "sha256": "61d4736a4c2ed2064f93e9a5cc57604ac5eb328f2bff5b87383c7453ff7f579f",
+      "size": [
+        1000,
+        706
+      ]
+    }
+  }
+}

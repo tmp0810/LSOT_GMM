@@ -1,0 +1,120 @@
+{
+  "upstream_repo": "https://github.com/tmp0810/Sliced-Amortized-OT",
+  "upstream_revision": "59234586542d905d951eae1af7b03566733e528f",
+  "upstream_pair_file": "data_color_transfer/paintings/pairs.txt",
+  "upstream_url_file": "data_color_transfer/wikiart-urls.txt",
+  "pairs": [
+    {
+      "index": 0,
+      "source": "market-in-algiers",
+      "target": "argenteuil-the-seine",
+      "directory": "pair_00_market-in-algiers__argenteuil-the-seine"
+    },
+    {
+      "index": 2,
+      "source": "fuji-mountains-in-clear-weather-1831",
+      "target": "distant-view-of-the-pyramids-1921",
+      "directory": "pair_02_fuji-mountains-in-clear-weather-1831__distant-view-of-the-pyramids-1921"
+    },
+    {
+      "index": 3,
+      "source": "breakup-of-ice",
+      "target": "senecio-1922",
+      "directory": "pair_03_breakup-of-ice__senecio-1922"
+    },
+    {
+      "index": 5,
+      "source": "haystacks-at-giverny",
+      "target": "argenteuil",
+      "directory": "pair_05_haystacks-at-giverny__argenteuil"
+    },
+    {
+      "index": 14,
+      "source": "red-vineyards-at-arles-1888",
+      "target": "the-seine-at-vetheuil",
+      "directory": "pair_14_red-vineyards-at-arles-1888__the-seine-at-vetheuil"
+    }
+  ],
+  "images": {
+    "market-in-algiers": {
+      "page_url": "https://www.wikiart.org/en/august-macke/market-in-algiers",
+      "sha256": "ae9e922fe7fe14bca476f67b8377e463768ef071d2e46e15517fde85bc444eb5",
+      "size": [
+        467,
+        600
+      ]
+    },
+    "argenteuil-the-seine": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/argenteuil-the-seine",
+      "sha256": "ac32a5e9517f54bf33b6bf1b2258c8cd6c681853bd222b2844a882d9ac8ce143",
+      "size": [
+        741,
+        600
+      ]
+    },
+    "fuji-mountains-in-clear-weather-1831": {
+      "page_url": "https://www.wikiart.org/en/katsushika-hokusai/fuji-mountains-in-clear-weather-1831",
+      "sha256": "1105e4d04f7dceeb3f126d2e1fd28ba09582f5145c9c016cd188b6f166594e8f",
+      "size": [
+        750,
+        501
+      ]
+    },
+    "distant-view-of-the-pyramids-1921": {
+      "page_url": "https://www.wikiart.org/en/winston-churchill/distant-view-of-the-pyramids-1921",
+      "sha256": "4c3409f922cb8bf85cf120d5d7ab85bdd82706b725c3cc28903f640c6b22a2ce",
+      "size": [
+        500,
+        399
+      ]
+    },
+    "breakup-of-ice": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/breakup-of-ice",
+      "sha256": "2570c74dd3fd1c733e24ab50cc6a22c4bc4dc77a37c7a9035e243a18a43dd457",
+      "size": [
+        750,
+        552
+      ]
+    },
+    "senecio-1922": {
+      "page_url": "https://www.wikiart.org/en/paul-klee/senecio-1922",
+      "sha256": "3c8f3f48ee0becf1b9e5eaddf382e83741aa69bf33c4fb1acdd121763f058263",
+      "size": [
+        548,
+        600
+      ]
+    },
+    "haystacks-at-giverny": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/haystacks-at-giverny",
+      "sha256": "ec34e8756d9be6c5c22bbd80c29cda9e946bb49391c580fd5fc51c6ecb4aee62",
+      "size": [
+        750,
+        598
+      ]
+    },
+    "argenteuil": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/argenteuil",
+      "sha256": "bb155c3d11d375776d254b53a42eaee5d4bcaba88c6e88c0c4fc8a04390d6686",
+      "size": [
+        750,
+        573
+      ]
+    },
+    "red-vineyards-at-arles-1888": {
+      "page_url": "https://www.wikiart.org/en/vincent-van-gogh/red-vineyards-at-arles-1888",
+      "sha256": "fadb96b790d02bdce9c05fd3e076a97ffd8a1ef60ae9c686d4f6bdf6b0e8888c",
+      "size": [
+        750,
+        585
+      ]
+    },
+    "the-seine-at-vetheuil": {
+      "page_url": "https://www.wikiart.org/en/claude-monet/the-seine-at-vetheuil",
+      "sha256": "9c5f81ecab8e0eae32e7fcbb9819091e5a27a70d685e1dd2171462246b3e56a1",
+      "size": [
+        442,
+        600
+      ]
+    }
+  }
+}
