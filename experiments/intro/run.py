@@ -24,6 +24,7 @@ from lsot import (GMM, BarycentricMap, average_lsot, minimum_lsot,
                   optimized_minimum_lsot, solve_mw2)
 from lsot.gaussians import covariance_roots, symmetric_sqrt
 from lsot.projections import PROJECTION_KINDS, sample_projection_bank
+from .presentation import DEFAULT_TIMES, export_sequences, validate_times
 
 
 TIMES_1D = (0.2, 0.5, 0.8)
@@ -166,7 +167,7 @@ def _map_1d(source, target, plan, x, output):
     plt.close(fig)
 
 
-def _grid_w2_figures(case, source, target, x, points, out):
+def _grid_w2_figures(case, source, target, x, points, out, times=DEFAULT_TIMES):
     """Regularized W2 barycenter comparison from the original notebook."""
     import ot
 
@@ -178,22 +179,31 @@ def _grid_w2_figures(case, source, target, x, points, out):
     cost = ot.dist(points, points, metric="sqeuclidean")
     if case == "1d":
         cost /= cost.max()
+    cache = {0.0: a, 1.0: b}
+
+    def barycenter(t):
+        if t not in cache:
+            values = ot.bregman.barycenter(np.column_stack((a, b)), cost, 1e-3,
+                                           weights=np.array([1-t, t]))
+            cache[t] = values / values.sum()
+        return cache[t]
+
+    sequence = np.stack([barycenter(t) for t in times])
+    if case == "1d":
         coupling = ot.emd(a, b, cost)
         fig, axes = plt.subplots(1, 2, figsize=(10, 4))
         axes[0].imshow(coupling, origin="lower", cmap="Blues", aspect="auto")
         axes[0].set(title="Discrete W2 coupling", xlabel="target grid index",
                     ylabel="source grid index")
         for t in TIMES_1D:
-            bary = ot.bregman.barycenter(np.column_stack((a, b)), cost, 1e-3,
-                                         weights=np.array([1-t, t]))
+            bary = barycenter(t)
             axes[1].plot(x, bary / bary.sum(), label=f"t={t:g}")
         axes[1].plot(x, a, ":", color="#27659b")
         axes[1].plot(x, b, ":", color="#bf4f3c")
         axes[1].set(title="Regularized grid W2 barycenter", xlabel="x")
         axes[1].legend()
     else:
-        bary = ot.bregman.barycenter(np.column_stack((a, b)), cost, 1e-3,
-                                     weights=np.array([0.5, 0.5]))
+        bary = barycenter(0.5)
         fig, axes = plt.subplots(1, 3, figsize=(11, 3.6), constrained_layout=True)
         for ax, z, title in zip(axes, (a, bary, b), ("Source", "W2, t=0.5", "Target")):
             ax.contour(x, x, z.reshape(len(x), len(x)), levels=8, cmap="viridis")
@@ -202,6 +212,7 @@ def _grid_w2_figures(case, source, target, x, points, out):
         fig.tight_layout()
     fig.savefig(out / f"{case}_grid_w2.png", dpi=170)
     plt.close(fig)
+    return sequence
 
 
 def _run_case(case, source, target, args, output):
@@ -212,8 +223,9 @@ def _run_case(case, source, target, args, output):
         X, Y = np.meshgrid(x, x)
         points = np.column_stack((X.ravel(), Y.ravel()))
     _components_figure(source, target, case, x, points, output / f"{case}_components.png")
+    grid_w2 = None
     if not args.skip_grid_w2:
-        _grid_w2_figures(case, source, target, x, points, output)
+        grid_w2 = _grid_w2_figures(case, source, target, x, points, output, args.times)
 
     t0 = time.perf_counter()
     reference, mw2_cost = solve_mw2(source, target)
@@ -263,6 +275,14 @@ def _run_case(case, source, target, args, output):
             record(f"{mode}-LSOT-{kind}_L{args.L}", kind, mode, plan, elapsed,
                    initial_cost, best_iteration)
     _comparison_figures(case, source, target, plans, x, points, output)
+    sequences = {}
+    first = _mixture_density(source, points)
+    last = _mixture_density(target, points)
+    for name, plan in plans.items():
+        values = [first if t == 0 else last if t == 1 else
+                  _interpolated_density(source, target, plan, points, t) for t in args.times]
+        sequences[name] = np.stack([density / density.sum() for density in values])
+    export_sequences(case, x, points, args.times, sequences, output, grid_w2=grid_w2)
     return records
 
 
@@ -278,9 +298,15 @@ def main(argv=None):
     parser.add_argument("--grid-1d", type=int, default=100)
     parser.add_argument("--grid-2d", type=int, default=50)
     parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument("--times", type=float, nargs="+", default=list(DEFAULT_TIMES),
+                        help="Times for individual images and paper-style strips (default: 0 .2 .4 .6 .8 1)")
     parser.add_argument("--skip-grid-w2", action="store_true",
                         help="Skip the notebook's regularized grid W2 barycenter figures")
     args = parser.parse_args(argv)
+    try:
+        validate_times(args.times)
+    except ValueError as error:
+        parser.error(str(error))
     if (args.L < 1 or args.seed < 0 or args.opt_steps < 0 or args.opt_samples < 1
             or args.opt_epsilon <= 0 or args.opt_learning_rate <= 0
             or args.grid_1d < 2 or args.grid_2d < 2 or args.threads < 1):
