@@ -1,15 +1,2 @@
 LSOT_GMM
 
-For the 1D/2D introduction experiment with individual time panels and
-six-column paper-style figures per avg/min method, see
-[the interpolation output guide](experiments/intro/README.md).
-
-For color transfer across the fixed WikiArt painting pairs from
-Sliced-Amortized-OT, see [the Colab and result guide](docs/wikiart_color_transfer.md).
-The [five-pair K=50, L=100 pilot results](docs/wikiart_pilot_results.md)
-include per-pair numerical comparisons against MW2.
-The [complete 19-pair K=50, L=100 comparison](docs/wikiart_full_results.md)
-contains every upstream pair and all thirteen methods.
-
-For K=5/10/20/50/100/200 with fixed L=100 and **avg/min LSOT + MW2**
-(nine methods), see [the resumable K-sweep and plotting guide](docs/wikiart_k_sweep.md).
