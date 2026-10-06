@@ -24,7 +24,7 @@ def validate_times(times):
     return values
 
 
-def _panel(axis, case, x, values, t, vmax):
+def _panel(axis, case, x, values, t, vmax, *, axis_labels=True):
     if case == "1d":
         color = "#24952a" if t == 0 else "#e33333" if t == 1 else "#3489cd"
         axis.plot(x, values, color=color, linewidth=1.6)
@@ -38,9 +38,10 @@ def _panel(axis, case, x, values, t, vmax):
         axis.set_aspect("equal")
     axis.set_xlim(x[0], x[-1])
     axis.tick_params(labelsize=7)
-    axis.set_xlabel("x", fontsize=8)
-    if case == "2d":
-        axis.set_ylabel("y", fontsize=8)
+    if axis_labels:
+        axis.set_xlabel("x", fontsize=8)
+        if case == "2d":
+            axis.set_ylabel("y", fontsize=8)
 
 
 def _strip(case, x, times, rows, labels, path, vmax):
@@ -86,10 +87,7 @@ def export_sequences(case, x, points, times, sequences, output, *, grid_w2=None)
                             probabilities=values)
         for index, t in enumerate(times):
             figure, axis = plt.subplots(figsize=(4.2, 3.5))
-            _panel(axis, case, x, values[index], t, vmax)
-            axis.set_title(f"{name}\n" + rf"$t={time_tag(t)}$", fontsize=11)
-            if case == "1d":
-                axis.set_ylabel("Grid probability", fontsize=9)
+            _panel(axis, case, x, values[index], t, vmax, axis_labels=False)
             figure.tight_layout()
             figure.savefig(folder / f"t_{time_tag(t)}.png", dpi=170)
             plt.close(figure)

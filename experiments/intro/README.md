@@ -29,6 +29,10 @@ under `results/intro/methods/min-LSOT-Mix_L100/`:
 | `1d/sequence.npz`, `2d/sequence.npz` | Actual times, grid, points and normalized grid probabilities. |
 
 Equivalent folders are generated for all eight LSOT methods and `MW2`.
+Individual `t_*.png` panels contain only the plot and numeric axis ticks:
+no method/time title and no x/y or probability axis labels. The method and
+time remain identifiable from the folder and filename. Strips retain their
+time headings and method labels for presentation.
 `methods/grid-W2/` holds the six grid-W2 panels and its strips. The older
 `1d_grid_w2.png`/`2d_grid_w2.png`, combined method figures, metrics, plans
 and 1D maps are retained. The old combined previews still show three
