@@ -1,8 +1,3 @@
-"""Proportional lifting of monotone 1D plans; no ground-cost masking.
-
-The fast path batches projections without ties. Exact ties use the original
-fiber-wise proportional rule, including when a self-plan is not diagonal.
-"""
 from dataclasses import dataclass
 import numpy as np
 import torch
@@ -51,21 +46,17 @@ class SparsePlan:
 
 
 def _monotone_entries(a, b):
-    """Batched cumulative-interval intersections; a=(L,K0), b=(L,K1)."""
     ca, cb = a.cumsum(-1), b.cumsum(-1)
-    # Probability intervals end at exactly one despite floating point roundoff.
     ca = torch.cat((ca[:, :-1].clamp(max=1), torch.ones_like(ca[:, -1:])), dim=1)
     cb = torch.cat((cb[:, :-1].clamp(max=1), torch.ones_like(cb[:, -1:])), dim=1)
     edges = torch.cat((a.new_zeros((len(a), 1)), ca, cb), dim=1).sort(dim=1).values
     left, right = edges[:, :-1], edges[:, 1:]
-    # right=True chooses the atom immediately to the right of each left edge.
     i = torch.searchsorted(ca.contiguous(), left.contiguous(), right=True).clamp(max=a.shape[1] - 1)
     j = torch.searchsorted(cb.contiguous(), left.contiguous(), right=True).clamp(max=b.shape[1] - 1)
     return i, j, right - left
 
 
 def lift_projection(a_values, b_values, a, b):
-    """One projection with exact fiber aggregation and proportional lifting."""
     av, ia = torch.sort(a_values, stable=True)
     bv, ib = torch.sort(b_values, stable=True)
     _, ag = torch.unique_consecutive(av, return_inverse=True)
@@ -87,17 +78,6 @@ def lift_projection(a_values, b_values, a, b):
 
 
 def _projected_plan_entries(x, y, a, b):
-    """Unscaled entries of all lifts, tagged by their projection index.
-
-    Both aggregations use this same construction. Keeping entries sparse
-    avoids allocating an L x K0 x K1 tensor.
-    """
-    if x.ndim != 2 or y.ndim != 2 or x.shape[1] != y.shape[1] or x.shape[1] == 0:
-        raise ValueError("expected projected locations (K0,L) and (K1,L), L>0")
-    if x.shape[0] != len(a) or y.shape[0] != len(b):
-        raise ValueError("projected locations must match the component weights")
-    if not bool(torch.isfinite(x).all() and torch.isfinite(y).all()):
-        raise ValueError("projected locations must be finite")
     xs, ix = torch.sort(x.T, dim=1, stable=True)
     ys, iy = torch.sort(y.T, dim=1, stable=True)
     ties = (xs[:, 1:] == xs[:, :-1]).any(1) | (ys[:, 1:] == ys[:, :-1]).any(1)
@@ -120,13 +100,11 @@ def _projected_plan_entries(x, y, a, b):
 
 
 def average_projected_plans(x, y, a, b):
-    """Average L lifts from locations (K0,L)/(K1,L), preserving exact ties."""
     _, rows, cols, mass = _projected_plan_entries(x, y, a, b)
     return SparsePlan.from_entries(rows, cols, mass / x.shape[1], (len(a), len(b)))
 
 
 def average_lsot(source, target, bank, kind):
-    """Return the averaged lift; evaluate its true Gaussian cost separately."""
     x = project_gaussians(source.means, source.covariances, bank, kind)
     y = project_gaussians(target.means, target.covariances, bank, kind)
     return average_projected_plans(x, y, source.weights, target.weights)
@@ -134,11 +112,6 @@ def average_lsot(source, target, bank, kind):
 
 @dataclass(frozen=True)
 class MinimumLSOTResult:
-    """Best lift in a finite bank, selected by its true Gaussian ground cost.
-
-    projection_index is zero-based; exact cost ties choose the first index.
-    Costs are squared distances, not projected costs or their square roots.
-    """
     plan: SparsePlan
     cost_squared: torch.Tensor
     projection_index: int
@@ -146,12 +119,6 @@ class MinimumLSOTResult:
 
 
 def minimum_projected_plan(x, y, source, target):
-    """Select the lowest-cost lift from precomputed scalar projections.
-
-    Each transported component pair's Gaussian W2-squared cost is evaluated
-    once, even when the pair occurs in several candidate plans. Selection
-    uses sum_ij P^ell_ij c_ij, never the one-dimensional projected OT cost.
-    """
     directions, rows, cols, mass = _projected_plan_entries(x, y, source.weights, target.weights)
     pairs, inverse = torch.unique(rows * target.count + cols, return_inverse=True)
     pair_costs = gaussian_pair_costs(source, target, pairs // target.count, pairs % target.count)
@@ -163,11 +130,6 @@ def minimum_projected_plan(x, y, source, target):
 
 
 def minimum_lsot(source, target, bank, kind):
-    """Return the best single lift over the supplied finite projection bank.
-
-    This approximates the infimum over projections by a finite search. One
-    projection is selected for the entire GMM pair, before pixel mapping.
-    """
     x = project_gaussians(source.means, source.covariances, bank, kind)
     y = project_gaussians(target.means, target.covariances, bank, kind)
     return minimum_projected_plan(x, y, source, target)
@@ -175,7 +137,6 @@ def minimum_lsot(source, target, bank, kind):
 
 @dataclass(frozen=True)
 class TopKLSOTResult:
-    """Uniform mixture of the k cheapest lifts in one shared projection bank."""
     plan: SparsePlan
     cost_squared: torch.Tensor
     projection_indices: torch.Tensor
@@ -183,12 +144,6 @@ class TopKLSOTResult:
 
 
 def topk_projected_plan(x, y, source, target, k):
-    """Rank lifts by Gaussian ground cost and average the best k plans.
-
-    The selected projections are sorted by cost, breaking exact ties by
-    their original bank index. Each lift has full unit mass and the same
-    marginals, so their uniform mixture is another admissible plan.
-    """
     if type(k) is not int or k < 1 or k > x.shape[1]:
         raise ValueError("k must be an integer between 1 and the bank size")
     directions, rows, cols, mass = _projected_plan_entries(x, y, source.weights, target.weights)
@@ -203,18 +158,12 @@ def topk_projected_plan(x, y, source, target, k):
 
 
 def topk_lsot(source, target, bank, kind, k):
-    """Return the average of the k cheapest lifts in a finite bank."""
     x = project_gaussians(source.means, source.covariances, bank, kind)
     y = project_gaussians(target.means, target.covariances, bank, kind)
     return topk_projected_plan(x, y, source, target, k)
 
 
 def solve_mw2(source, target):
-    """Run the preserved gmmot.GW2 baseline (SciPy/POT on CPU).
-
-    Its legacy name GW2 means MW2 here; the returned scalar is SQUARED cost.
-    Transfers occur inside this function and belong to its measured runtime.
-    """
     from gmmot import GW2
     arrays = [t.detach().cpu().numpy() for t in
               (source.weights, target.weights, source.means, target.means,
