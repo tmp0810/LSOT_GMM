@@ -1,0 +1,54 @@
+{
+  "source_notebook": "https://github.com/judelo/gmmot/blob/0984edc826b113e35c3260b699a4ff49ab39d25f/python/GMM_OT_Barycenters.ipynb",
+  "source_notebook_blob": "78ed4c246b4bc89cbd98ecdacd4d66b9a0e4d02a",
+  "source_cell": 18,
+  "source_display_sha256": "432c4d928f2509cb41cae4b3bca8831b381a5f4af6378728b89ac0c009f5b798",
+  "provenance": "Foreground masks recovered from the saved input-image display (inverse viridis lookup at 128x128 pixel centers). Original PNGs are absent from gmmot. The redcross and duck foreground masks match the corresponding POT images exactly. Raw PNG identity for star and batman cannot be verified.",
+  "shape": [
+    128,
+    128
+  ],
+  "encoding": "zlib-compressed numpy.packbits, bitorder=big, C order",
+  "masks": {
+    "redcross": {
+      "data": "eJxjYACC+v9A8I8BDkb5o/wB4v8fBaNgGIOBzl+j/FE+Mh8AjmSeHw==",
+      "foreground_pixels": 9660,
+      "mask_sha256": "87ffd2e461c29414af0650ec463006988af4d67c1454233801c70592cd1e9713",
+      "display_sampling": {
+        "left": 33.5,
+        "top": 10.0,
+        "width": 266.25
+      }
+    },
+    "duck": {
+      "data": "eJy11E2OgzAMBWBQFll0Ec0JepQcDW5WjsIRWHZR9U2hGfB7TWPNH7tPShzbcei6d995aRt3YgBG65M4AlPLCZjpOIAOzMC15Yt4AG5/afi+O4Z6cnx1bDsMCbD59s9emrblrP0UU/tc51+b5/XsOPN1rR7FM+fLluvSeYkyH4PMBxvg6y6emF8J4J2XUmnTYeezgCge2OngVqAabdvla8Geg+O+6ZHS33wRy/roODvGN+3FC+J+YL/Ul1rupEEVUwadXHDNHwe3ge/FJqD6+WCS+AiwVH2UPNe9Byzv5STee0qPz7zPLI42vYpLgGl3oO2lBPs7SODfo/qxY7R8RGT/9PsEIYeIYQ==",
+      "foreground_pixels": 7239,
+      "mask_sha256": "15aa387e3746e452eec4882f356d0536d253925da4fa37ee000458f4ccd88467",
+      "display_sampling": {
+        "left": 353.5,
+        "top": 10.0,
+        "width": 266.5
+      }
+    },
+    "star": {
+      "data": "eJyV1L1uwjAQB3AHCCpCTAypxMKWMd0YYejOG5S8AVJfgDxCX6Aqj8DcJYyMjN26VBVDpwohlY9cbd/ZOSMF8A1NfkX4Ev/PCHFTBVc+r2eX3Z77OVr7Odn4efrlerL1c773cjA7ebkGRebjJhRL7hBgdMkdgJS7DTD3cQSw9nEM4ASQXPEU4Id7ArC95E+AHXcOsL/NdVA1Azjpm+xO/TNQ1h/3E3BqE7let1z3Gw6LUX3GfcpU67IOQoy55VQOuFdC9LgXQvAGxUiOAmtwzOSzswYH9QqswTdlwZZ3GiyUO6VT5bKBWp43+LObj7WzYbPlhegav6BtgxRtGpiRDobO8raBTZgysRPSdZa3DVLjGi6/PHNm3LCbiRXi9yt9vn4bPa9yj+2uKpqhdZVpBD6MY2c77ftvqkyJ25+4CXpb5fP9zWXUM3ZipA95aTUA2zFNl8DTsorNiUEveqXVEUhDPfy6ZN7HTP8hq6hl6EXpnXoo44Z+9dgGFOqouzaQUEfRsW7pqJvyMKLbepJkg7nxDt+a3MNJmpqAIpykrgkkwoVaxgOcpKYJKMZBDYYUUPKL1zcKJKFBnZLH9L0BBTSh52xRIE9LvDbJr7QP9We8vgvh3Dwa08298YO4Xv9um5PP",
+      "foreground_pixels": 5294,
+      "mask_sha256": "936318b0a11afc40ea166bf07be56f2f200b0aa79e6d134147962af6c41abf27",
+      "display_sampling": {
+        "left": 674.0,
+        "top": 10.0,
+        "width": 266.5
+      }
+    },
+    "batman": {
+      "data": "eJzt1TFv00AUB/DnpCZIKSpSBoOiqpUYMgbRgYHBFgyMfAOcD4Lk68bIBwDVH6HfIB6QYMNjNndg8BhFVtW6sR/vf+eLXSO1QmyIG075Oefcc+T3PyIMN3YT6gw3Hd/vx1ZPyM0nCe1bL8ReQi+sPxt/aTj8QO56lND7hfH+WjxPKDw3njSefzeeWxfGZ+ICLo2jC3I5S2hUKdDhnNxtmJBX65oHMLOYj3XtrT/B09Z6w5fWY/6pt+eV9QbOOIWVGAU4vviQ+Vxc6e3ET41rhe3EU2MOCHPrWP6NrqUgr+uU6KjrHOUYf4SLxq9YahdLgSH8rLEUuIRnjavf7EQszyf+ip1rBedwAXMgjyMe9Rxax4+sSyziWP4JXhtLZZxOtP2dT6yv6B1uxcUtiqpwkzXDZzIXuFiiqFotratT+I1MfAlvX8vEb+ESi/gUk+Kd9fiG6bq1HpXfc3S367757/x//Fvjj9+H6G7f9z5Wy9vuv99l30dNY2BIw25C5sivfbnT396Y/gqyKpPOym4kugppUjUrkRdhMTD9qbwSeTTPrQ8K7ZX44kQadVggL72UIvR/rVysDLxY2jg95Jq0SVvyA3aimrwAJrGTiNUIXgwQoseOL0ZWBYMIoUpLRC1WOX0vGc50NEc67+AQHkTXyMfWyEfj+Ub7EnmqXWgXyN+Oc+SzhDh58B7yeWic65MlRr7fttt1gB/BIXKwkmmM0h0/hlMYD0E/WusDbrbzUJ9HU/0VivL0ebWnv8Ii77k+Xsn6YWJPYOMH1Fo1H34B5nQntQ==",
+      "foreground_pixels": 10567,
+      "mask_sha256": "8fc66d2d6f4238683eee6370797b8203253502233c3c422a833ef58984306fee",
+      "display_sampling": {
+        "left": 995.0,
+        "top": 10.0,
+        "width": 266.5
+      }
+    }
+  }
+}

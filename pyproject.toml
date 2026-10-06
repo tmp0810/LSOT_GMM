@@ -26,6 +26,7 @@ include = ["lsot*", "param_proj*", "distribution_proj*", "experiments*"]
 
 [tool.setuptools.package-data]
 "experiments.color_transfer" = ["configs/*.json", "wikiart/*.txt"]
+"experiments.barycenter" = ["configs/*.json", "assets/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

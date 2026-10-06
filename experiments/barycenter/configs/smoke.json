@@ -1,0 +1,13 @@
+{
+  "cases": ["gaussian", "synthetic", "images"],
+  "image_components": 12,
+  "grid_size": 3,
+  "gaussian_iterations": 10,
+  "L": 8,
+  "seed": 0,
+  "steps": 3,
+  "eval_samples": 128,
+  "eval_projections": 16,
+  "device": "cpu",
+  "threads": 1
+}
