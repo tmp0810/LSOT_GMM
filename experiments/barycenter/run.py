@@ -91,7 +91,7 @@ def run_case(case, args, root):
     folder.mkdir(parents=True, exist_ok=True)
     settings = {k: v for k, v in vars(args).items()
                 if k not in {"output_dir", "no_resume", "image_dir"}}
-    settings["schema_version"] = 2
+    settings["schema_version"] = 3
     settings["input_components"] = [source.count for source in case.inputs]
     budget = args.barycenter_components or sum(source.count for source in case.inputs)-len(case.inputs)+1
     settings["effective_barycenter_components"] = budget
@@ -150,10 +150,12 @@ def run_case(case, args, root):
                           "mw2_to_reference": 0., "sw2_to_reference": 0., "density_l1_to_reference": 0.,
                           "initialization_ms": 0., "solve_ms": elapsed, "total_ms": elapsed,
                           "iterations": args.gaussian_iterations, "evaluations": 0,
+                          "gradient_evaluations": 0,
                           "status": "anchor" if np.count_nonzero(weights) == 1 else "multimarginal_lp",
                           "gradient_inf": None, "gradient_tolerance_met": None,
                           "optimizer_starts": 0, "curvature_restarts": 0,
                           "warmup_steps": 0, "start_summaries": "[]",
+                          "optimizer": "multimarginal_lp", "adam_learning_rate": None,
                           "marginal_error": solved.marginal_error}
             x, density = density_grid(reference, case.bounds, case.density_grid)
             save_gmm(reference_file, reference, x=x, density=density, input_weights=weights)
@@ -190,6 +192,7 @@ def run_case(case, args, root):
             if anchor:
                 candidate, elapsed, init_value, value = reference, 0., 0., 0.
                 iterations, evaluations, status, history = 0, 0, "anchor", []
+                gradient_evaluations = 0
                 gradient, gradient_met, starts, restarts, start_summaries = 0., True, 0, 0, []
             else:
                 if initializations is None:
@@ -217,11 +220,13 @@ def run_case(case, args, root):
                     coordinate_scale=max(1., case.bounds[1]-case.bounds[0]),
                     learn_weights=not args.freeze_weights, initializations=initializations,
                     stall_patience=args.stall_patience, max_restarts=args.max_restarts,
-                    warmup_steps=args.warmup_steps)
+                    warmup_steps=args.warmup_steps, optimizer_kind=args.optimizer,
+                    adam_learning_rate=args.adam_learning_rate)
                 synchronize(args.device)
                 elapsed = 1000*(time.perf_counter()-start)
                 candidate, init_value, value = result.gmm, result.initial_objective, result.objective
                 iterations, evaluations, status, history = result.iterations, result.evaluations, result.status, result.history
+                gradient_evaluations = result.gradient_evaluations
                 gradient, gradient_met = result.gradient_inf, result.gradient_tolerance_met
                 starts, restarts, start_summaries = result.starts, result.restarts, result.start_summaries
             x, density = density_grid(candidate, case.bounds, case.density_grid)
@@ -240,10 +245,14 @@ def run_case(case, args, root):
                       "initialization_ms": 0. if anchor else initialization_ms, "solve_ms": elapsed,
                       "total_ms": elapsed+(0. if anchor else initialization_ms),
                       "iterations": iterations, "evaluations": evaluations, "status": status,
+                      "gradient_evaluations": gradient_evaluations,
                       "gradient_inf": gradient, "gradient_tolerance_met": gradient_met,
                       "optimizer_starts": starts, "curvature_restarts": restarts,
                       "warmup_steps": args.warmup_steps if not anchor else 0,
                       "start_summaries": json.dumps(start_summaries),
+                      "optimizer": ("anchor" if anchor else "adam" if args.optimizer == "adam"
+                                    else "adam_lbfgs" if args.warmup_steps else "lbfgs"),
+                      "adam_learning_rate": args.adam_learning_rate if not anchor else None,
                       "marginal_error": None}
             save_gmm(gmm_file, candidate, x=x, density=density, input_weights=weights)
             save_panel(method_folder / "images" / f"{tag}.png", x, density, show_axes=args.show_axes)
@@ -282,7 +291,9 @@ def main(argv=None):
     parser.add_argument("--L", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda", "auto"))
-    parser.add_argument("--steps", type=int, default=80, help="L-BFGS outer-step budget per start")
+    parser.add_argument("--optimizer", choices=("adam", "lbfgs"), default="lbfgs")
+    parser.add_argument("--adam-learning-rate", type=float, default=.01)
+    parser.add_argument("--steps", type=int, default=80, help="Updates per start for the selected optimizer")
     parser.add_argument("--starts", type=int, default=4,
                         help="Shared spatial starts; one for the single-Gaussian case")
     parser.add_argument("--stall-patience", type=int, default=8)
@@ -321,6 +332,7 @@ def main(argv=None):
             or args.grid_size < 2 or args.barycenter_components < 0 or args.steps < 0
             or args.seed < 0 or args.learning_rate <= 0 or args.tolerance_grad < 0 or args.tolerance_change < 0
             or args.max_restarts < 0 or args.warmup_steps < 0
+            or args.adam_learning_rate <= 0 or (args.optimizer == "adam" and args.warmup_steps != 0)
             or len(set(args.methods)) != len(args.methods)):
         parser.error("Invalid counts, optimizer settings, or duplicate methods")
     args.output_dir.mkdir(parents=True, exist_ok=True)

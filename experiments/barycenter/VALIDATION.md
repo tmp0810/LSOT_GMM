@@ -86,3 +86,46 @@ soft-sorting surrogate or a pure L-BFGS comparison.
 Original shape PNGs are absent from the upstream MW2 repository. Tests use
 the documented recovered masks, with exact POT foreground checks for
 redcross/duck; original star/batman pixel identity remains unverified.
+
+## Adam-only paired comparison
+
+Pure Adam now has an explicit optimizer flag and fixed step budget; no
+L-BFGS object is constructed. Regression tests verify this, best-iterate
+restoration, frozen weights, exact parity with the same warmup prefix, and
+rejection of an ambiguous extra warmup. The targeted suite now reports
+**72 passed, 9 skipped** (CPU only). Objective and gradient evaluations are
+logged separately.
+
+At L=100 and one identical common start, Adam200 and Adam280 were compared
+with Adam200 + L-BFGS80. Inputs/initialization stay fixed at seed 0 while
+projection bank seeds vary. Synthetic checks cover all eight methods and
+three bank seeds (24 paired settings); image checks cover all eight methods
+at bank seed 0 (8 settings). All optimizer stages are included in timings;
+setup/reference evaluations/plots and one-time optimizer imports are not.
+There is one timing measurement per setting, so ratios are diagnostic CPU
+measurements. Equal outer-iteration counts are not equal computation.
+
+| Data | Adam updates | Mean loss gap to hybrid | Maximum gap | Median hybrid/Adam time | Adam lower/equal |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| synthetic | Adam200 | 0.111% | 0.619% | 2.69 | 0/24 |
+| synthetic | Adam280 | -0.127% | 0.619% | 1.90 | 10/24 |
+| images | Adam200 | 1.523% | 4.265% | 2.98 | 0/8 |
+| images | Adam280 | 1.386% | 4.265% | 2.11 | 2/8 |
+
+A positive gap means Adam has a higher own-objective value. Adam280 improves
+the synthetic mean but is not uniformly better. Image gaps are larger;
+min-B retains the largest hybrid advantage (~4.27%). Adam200 is a simpler
+and faster fixed-budget choice, with a measured loss tradeoff. These are
+local center checks, not global convergence or full-grid claims.
+
+Exact paired costs/timings and settings are in
+`validation/optimizer_comparison.json`. The reproduction command is:
+
+```bash
+python -m experiments.barycenter.compare_optimizers --cases synthetic \
+  --seeds 0 1 2 --output-dir results/adam_comparison
+```
+
+The pure-Adam config also completes a 27-result all-case center run and a
+171-result 3x3 smoke run, including grids/PDFs/GIFs and resumed checkpoints.
+The full 7x7, 891-result pure-Adam run was not performed.

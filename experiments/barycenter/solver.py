@@ -1,4 +1,4 @@
-"""Variational avg/min LSOT barycenters with fixed slices and L-BFGS.
+"""Variational avg/min LSOT barycenters with fixed slices and Adam/L-BFGS.
 
 Hard projected ordering is recomputed at every evaluation. Gradients are
 piecewise derivatives of the actual lifted Gaussian cost, including the
@@ -105,6 +105,7 @@ class OptimizationResult:
     starts: int
     restarts: int
     start_summaries: list[dict]
+    gradient_evaluations: int
 
 
 def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
@@ -112,8 +113,8 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
                         tolerance_grad=1e-7, tolerance_change=1e-10,
                         coordinate_scale=1., learn_weights=True,
                         initializations=None, stall_patience=8, max_restarts=2,
-                        warmup_steps=0):
-    """Safeguarded L-BFGS on the unchanged hard lifted objective.
+                        warmup_steps=0, optimizer_kind="lbfgs", adam_learning_rate=.01):
+    """Adam or safeguarded L-BFGS on the unchanged hard lifted objective.
 
     ``steps`` is a per-start budget. Every method can receive the same saved
     spatial starts. A rejected line-search trial may be the best candidate:
@@ -124,10 +125,14 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
     Optional Adam warmup is explicit and defaults to zero; it can cross hard
     ordering boundaries before L-BFGS refinement. All selections still use
     the exact hard objective, with no entropy or soft-sorting surrogate.
+    ``optimizer_kind='adam'`` uses only ``steps`` Adam updates per start,
+    restores the best evaluated candidate, and never constructs L-BFGS.
     """
     if (steps < 0 or learning_rate <= 0 or history_size < 1 or stall_patience < 1
             or max_restarts < 0 or warmup_steps < 0 or tolerance_grad < 0
-            or tolerance_change < 0):
+            or tolerance_change < 0 or adam_learning_rate <= 0
+            or optimizer_kind not in {"adam", "lbfgs"}
+            or (optimizer_kind == "adam" and warmup_steps != 0)):
         raise ValueError("Invalid optimizer settings")
     starting_points = list(initializations) if initializations is not None else [initial]
     if not starting_points or any(g.count != initial.count or g.dimension != initial.dimension
@@ -147,7 +152,7 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
     best_start = 0
     history, summaries = [], []
-    evaluations, iteration, restarts = 0, 0, 0
+    evaluations, gradient_evaluations, iteration, restarts = 1, 0, 0, 0
     local_cost, local_state = initial_cost, best_state
     parameters = [p for p in model.parameters() if p.requires_grad]
     current_start = 0
@@ -156,7 +161,7 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
         return {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     def evaluate():
-        nonlocal evaluations, best_cost, best_state, best_start, best_gradient
+        nonlocal evaluations, gradient_evaluations, best_cost, best_state, best_start, best_gradient
         nonlocal local_cost, local_state
         model.zero_grad(set_to_none=True)
         value = objective(model())/loss_scale
@@ -169,6 +174,7 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
         norm = float(gradients.detach().abs().max())
         cost = float(value.detach())*loss_scale
         evaluations += 1
+        gradient_evaluations += 1
         if cost < local_cost:
             local_cost, local_state = cost, snapshot()
         if cost < best_cost:
@@ -194,7 +200,8 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
                         "phase": phase, "objective_squared": cost,
                         "best_objective_squared": best_cost,
                         "gradient_inf": gradient, "best_gradient_inf": best_gradient,
-                        "evaluations": evaluations, "restarts": restarts})
+                        "evaluations": evaluations, "gradient_evaluations": gradient_evaluations,
+                        "restarts": restarts})
 
     def gradient_backtracking():
         """Try full and block gradient steps before abandoning a start."""
@@ -234,18 +241,20 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
         try:
             _, cost, gradient = evaluate()
             record(cost, gradient, 0, "initial")
-            if warmup_steps:
-                warmup = torch.optim.Adam(parameters, lr=.01)
-                for warm_step in range(1, warmup_steps+1):
+            adam_steps = steps if optimizer_kind == "adam" else warmup_steps
+            if adam_steps:
+                warmup = torch.optim.Adam(parameters, lr=adam_learning_rate)
+                for warm_step in range(1, adam_steps+1):
                     # evaluate() has computed gradients at the current point.
                     warmup.step()
                     _, cost, gradient = evaluate()
                     iteration += 1
-                    record(cost, gradient, warm_step, "adam_warmup")
+                    record(cost, gradient, warm_step,
+                           "adam" if optimizer_kind == "adam" else "adam_warmup")
                 model.load_state_dict(local_state)
                 _, cost, gradient = evaluate()
-            optimizer = new_lbfgs()
-            for step in range(1, steps+1):
+            optimizer = new_lbfgs() if optimizer_kind == "lbfgs" else None
+            for step in range(1, (steps if optimizer_kind == "lbfgs" else 0)+1):
                 if gradient <= tolerance_grad:
                     status = "gradient_tolerance"
                     break
@@ -301,7 +310,7 @@ def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
         status = "stalled"
     return OptimizationResult(result, initial_cost, best_cost, iteration,
                               evaluations, status, history, gradient, met,
-                              len(starting_points), restarts, summaries)
+                              len(starting_points), restarts, summaries, gradient_evaluations)
 
 
 def mw2_objective(inputs, weights, candidate):

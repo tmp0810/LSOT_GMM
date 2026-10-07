@@ -240,3 +240,48 @@ def test_returned_gradient_is_recomputed_at_the_returned_best_candidate():
     assert all(b <= a for a, b in zip(best, best[1:]))
     assert result.objective <= result.initial_objective
     assert result.starts == 2
+
+
+def test_adam_only_never_constructs_lbfgs_and_restores_best_iterate(monkeypatch):
+    from . import solver
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Pure Adam must not construct L-BFGS")
+
+    monkeypatch.setattr(torch.optim, "LBFGS", forbidden)
+    inputs = synthetic_example().inputs
+    initial = shared_initialization(inputs, [.25]*4, 11)
+    bank = sample_projection_bank(2, 10, kind="B1D")
+    result = solver.optimize_barycenter(inputs, [.25]*4, initial, bank, "B1D", "min",
+                                        optimizer_kind="adam", steps=6, learn_weights=False)
+    assert result.iterations == 6
+    assert result.restarts == 0
+    assert len([r for r in result.history if r['phase'] == 'adam']) == 6
+    assert not any(r['phase'] in {'lbfgs', 'curvature_restart', 'adam_warmup'}
+                   for r in result.history)
+    assert result.objective == min(r['best_objective_squared'] for r in result.history)
+    torch.testing.assert_close(result.gmm.weights, initial.weights)
+    assert result.gradient_evaluations < result.evaluations
+
+
+def test_adam_only_matches_the_same_number_of_warmup_updates():
+    inputs = synthetic_example().inputs
+    initial = shared_initialization(inputs, [.25]*4, 11)
+    bank = sample_projection_bank(2, 10, kind="Mix")
+    pure = optimize_barycenter(inputs, [.25]*4, initial, bank, "Mix", "avg",
+                               optimizer_kind="adam", steps=7)
+    warm = optimize_barycenter(inputs, [.25]*4, initial, bank, "Mix", "avg",
+                               steps=0, warmup_steps=7)
+    assert pure.objective == pytest.approx(warm.objective, abs=1e-14)
+    torch.testing.assert_close(pure.gmm.means, warm.gmm.means)
+    torch.testing.assert_close(pure.gmm.covariances, warm.gmm.covariances)
+    torch.testing.assert_close(pure.gmm.weights, warm.gmm.weights)
+
+
+def test_pure_adam_rejects_an_ambiguous_extra_warmup():
+    inputs = gaussian_example().inputs
+    initial = shared_initialization(inputs, [1/3]*3, 1)
+    bank = sample_projection_bank(2, 1)
+    with pytest.raises(ValueError, match="Invalid optimizer settings"):
+        optimize_barycenter(inputs, [1/3]*3, initial, bank, "Mix", "avg",
+                            optimizer_kind="adam", warmup_steps=3)

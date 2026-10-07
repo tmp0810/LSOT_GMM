@@ -7,6 +7,47 @@ and B1D.
 
 ## Optimizer checks and revised solver
 
+### Adam-only experiment
+
+Pure Adam is now available without constructing L-BFGS or running a second
+optimizer. It uses a fixed update budget, Adam learning rate 0.01 by default,
+and returns the best exact hard-objective candidate encountered. Means,
+covariances, weights, projection formulas and banks are unchanged.
+
+```bash
+# Quick equal-weight synthetic check: MW2 + all eight LSOT methods.
+python -m experiments.barycenter.run --config experiments/barycenter/configs/adam.json \
+  --cases synthetic --center-only --output-dir results/barycenter_adam_check
+
+# Full 7x7 grids for the original Gaussian, synthetic and image experiments.
+python -m experiments.barycenter.run --config experiments/barycenter/configs/adam.json \
+  --output-dir results/barycenter_adam
+
+# Paired optimizer comparison, keeping inputs/start fixed across bank seeds.
+python -m experiments.barycenter.compare_optimizers --cases synthetic \
+  --seeds 0 1 2 --output-dir results/barycenter_optimizer_comparison
+```
+
+`adam.json` selects one start, 200 Adam steps, L=100 and no warmup. Override
+`--steps 280` for a longer pure-Adam run, or `--starts 4` for the shared spatial
+starts. The explicit CLI equivalent is `--optimizer adam --steps 200
+--starts 1 --adam-learning-rate 0.01`. With Adam, `--steps` counts Adam updates;
+with L-BFGS, it counts outer L-BFGS iterations. Adam rejects a nonzero
+`--warmup-steps` to avoid accidentally running two Adam stages.
+
+The comparison script checks Adam200, Adam280 and Adam200+L-BFGS80. It saves
+`comparison.csv`, `paired.csv`, `summary.csv`, center comparison images, and
+loss/gradient histories. Each paired solve uses identical inputs, start and
+bank. Input EM and initialization seeds are fixed at 0; only projection bank
+seeds vary. Objective/gradient evaluation counts are separate. Solver times
+include all optimizer stages and exclude shared setup, reference evaluation,
+plots and one-time optimizer import overhead. Equal outer-update budgets are
+not equal compute budgets; use measured time/evaluation counts.
+
+`max_steps` is expected for a fixed-budget Adam run. It does not establish
+convergence. Neither optimizer uses soft sorting or changes the variational
+objective. Use a new output folder when switching optimizer/configuration.
+
 The sampled variational objectives are unchanged:
 
 ```
