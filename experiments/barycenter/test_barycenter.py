@@ -7,7 +7,8 @@ from gmmot import create_cost_matrix_from_gmm, solveMMOT
 from lsot.plans import average_lsot, minimum_lsot
 from lsot.projections import PROJECTION_KINDS, sample_projection_bank
 from .data import synthetic_example, gaussian_example, image_cloud, bilinear_weights, grid_nodes
-from .reference import mw2_barycenter, shared_initialization, gaussian_barycenters
+from .reference import (mw2_barycenter, shared_initialization, shared_initializations,
+                        gaussian_barycenters)
 from .solver import BarycenterObjective, ParameterizedGMM, optimize_barycenter
 
 
@@ -124,6 +125,8 @@ def test_lbfgs_recovers_single_gaussian_barycenter(kind, mode):
     expected_mean, expected_covariance, expected_cost = gaussian_barycenters(
         means, covariances, weights, iterations=100)
     assert not result.status.startswith("numerical_stop")
+    assert result.gradient_tolerance_met
+    assert result.gradient_inf <= 1e-7
     assert result.objective <= result.initial_objective+1e-12
     assert result.objective == pytest.approx(expected_cost[0], abs=1e-8)
     np.testing.assert_allclose(result.gmm.means.numpy(), expected_mean, atol=1e-6)
@@ -140,3 +143,100 @@ def test_shared_initialization_respects_budget_without_mutating_inputs():
         assert bool((torch.linalg.eigvalsh(initial.covariances) > 0).all())
     for source, snapshot in zip(inputs, snapshots):
         torch.testing.assert_close(source.means, snapshot)
+
+
+def test_shared_starts_are_reproducible_and_preserve_the_original_first_start():
+    inputs = synthetic_example().inputs
+    weights = [.25]*4
+    starts = shared_initializations(inputs, weights, 11, starts=4, seed=7)
+    repeated = shared_initializations(inputs, weights, 11, starts=4, seed=7)
+    original = shared_initialization(inputs, weights, 11, seed=7)
+    assert len(starts) == 4
+    torch.testing.assert_close(starts[0].means, original.means)
+    for first, second in zip(starts, repeated):
+        assert first.count == 11
+        torch.testing.assert_close(first.weights, second.weights)
+        torch.testing.assert_close(first.means, second.means)
+        torch.testing.assert_close(first.covariances, second.covariances)
+
+
+def test_rejected_trial_gradient_cannot_certify_convergence(monkeypatch):
+    from lsot.gaussians import GMM
+    from . import solver
+
+    initial = GMM.from_numpy([1.], [[.5]], [[[.1]]])
+    bank = sample_projection_bank(1, 1)
+    # z=0 is a stationary maximum with loss 1; the accepted z=.5 has loss
+    # .5625 and a nonzero gradient. A last-trial gradient would report false
+    # convergence even though that stationary trial was rejected.
+    monkeypatch.setattr(solver, "BarycenterObjective",
+                        lambda *args: lambda g: (g.means[0, 0]**2-1)**2)
+
+    class RejectedStationaryTrial:
+        def __init__(self, parameters, **kwargs):
+            self.parameters = parameters
+
+        def step(self, closure):
+            original = self.parameters[0].detach().clone()
+            with torch.no_grad():
+                self.parameters[0].zero_()
+            closure()
+            with torch.no_grad():
+                self.parameters[0].copy_(original)
+
+    monkeypatch.setattr(torch.optim, "LBFGS", RejectedStationaryTrial)
+    result = optimize_barycenter([initial], [1.], initial, bank, "Mix", "avg",
+                                 steps=2, max_restarts=0)
+    assert result.gradient_inf == pytest.approx(1.5)
+    assert not result.gradient_tolerance_met
+    assert result.status != "gradient_tolerance"
+    assert result.objective == pytest.approx(.5625)
+
+
+def test_accepting_best_trial_resets_curvature_and_logs_its_actual_gradient(monkeypatch):
+    from lsot.gaussians import GMM
+    from . import solver
+
+    initial = GMM.from_numpy([1.], [[.5]], [[[.1]]])
+    bank = sample_projection_bank(1, 1)
+    monkeypatch.setattr(solver, "BarycenterObjective",
+                        lambda *args: lambda g: (g.means[0, 0]-1)**2)
+
+    class SuboptimalAcceptedTrial:
+        def __init__(self, parameters, **kwargs):
+            self.parameters = parameters
+
+        def step(self, closure):
+            with torch.no_grad():
+                self.parameters[0].fill_(1.)
+            closure()
+            with torch.no_grad():
+                self.parameters[0].fill_(.75)
+
+    monkeypatch.setattr(torch.optim, "LBFGS", SuboptimalAcceptedTrial)
+    result = optimize_barycenter([initial], [1.], initial, bank, "Mix", "avg", steps=2)
+    assert result.objective == 0
+    assert result.gradient_inf == 0
+    assert result.gradient_tolerance_met
+    assert result.restarts >= 1
+    retained = result.history[-1]
+    assert retained["objective_squared"] == 0
+    assert retained["gradient_inf"] == 0
+
+
+def test_returned_gradient_is_recomputed_at_the_returned_best_candidate():
+    inputs = synthetic_example().inputs
+    starts = shared_initializations(inputs, [.25]*4, 11, starts=2)
+    bank = sample_projection_bank(2, 12, kind="B1D")
+    result = optimize_barycenter(inputs, [.25]*4, starts[0], bank, "B1D", "min",
+                                 initializations=starts, steps=4, coordinate_scale=2.)
+    model = ParameterizedGMM(result.gmm, coordinate_scale=2.)
+    loss = BarycenterObjective(inputs, [.25]*4, bank, "B1D", "min")(model())/4.
+    loss.backward()
+    gradient = max(float(p.grad.abs().max()) for p in model.parameters() if p.grad is not None)
+    assert result.gradient_inf == pytest.approx(gradient, abs=1e-10)
+    assert result.gradient_tolerance_met == (gradient <= 1e-7)
+    best = [r["best_objective_squared"] for r in result.history]
+    assert all(b <= a for a, b in zip(best, best[1:]))
+    assert result.objective <= result.initial_objective
+    assert result.starts == 2

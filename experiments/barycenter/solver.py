@@ -100,84 +100,208 @@ class OptimizationResult:
     evaluations: int
     status: str
     history: list[dict]
+    gradient_inf: float
+    gradient_tolerance_met: bool
+    starts: int
+    restarts: int
+    start_summaries: list[dict]
 
 
 def optimize_barycenter(inputs, weights, initial, bank, kind, mode, *,
                         steps=80, learning_rate=1., history_size=10,
                         tolerance_grad=1e-7, tolerance_change=1e-10,
-                        coordinate_scale=1., learn_weights=True):
-    if steps < 0 or learning_rate <= 0 or history_size < 1:
-        raise ValueError("Invalid L-BFGS settings")
+                        coordinate_scale=1., learn_weights=True,
+                        initializations=None, stall_patience=8, max_restarts=2,
+                        warmup_steps=0):
+    """Safeguarded L-BFGS on the unchanged hard lifted objective.
+
+    ``steps`` is a per-start budget. Every method can receive the same saved
+    spatial starts. A rejected line-search trial may be the best candidate:
+    accepting it explicitly clears the old curvature history. Gradients for
+    stopping are always reevaluated at the retained candidate, never taken
+    from the last trial. ``stalled`` is not a convergence certificate.
+
+    Optional Adam warmup is explicit and defaults to zero; it can cross hard
+    ordering boundaries before L-BFGS refinement. All selections still use
+    the exact hard objective, with no entropy or soft-sorting surrogate.
+    """
+    if (steps < 0 or learning_rate <= 0 or history_size < 1 or stall_patience < 1
+            or max_restarts < 0 or warmup_steps < 0 or tolerance_grad < 0
+            or tolerance_change < 0):
+        raise ValueError("Invalid optimizer settings")
+    starting_points = list(initializations) if initializations is not None else [initial]
+    if not starting_points or any(g.count != initial.count or g.dimension != initial.dimension
+                                  for g in starting_points):
+        raise ValueError("All starts must have the same component budget and dimension")
+    objective = BarycenterObjective(inputs, weights, bank, kind, mode)
     model = ParameterizedGMM(initial, coordinate_scale=coordinate_scale,
                              learn_weights=learn_weights)
-    objective = BarycenterObjective(inputs, weights, bank, kind, mode)
-    parameters = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.LBFGS(parameters, lr=learning_rate, max_iter=1,
-                                  max_eval=25, history_size=history_size,
-                                  tolerance_grad=tolerance_grad,
-                                  tolerance_change=tolerance_change,
-                                  line_search_fn="strong_wolfe")
+    # Uniform objective scaling preserves the minimizers and makes image and
+    # synthetic stopping tolerances comparable in normalized spatial units.
+    loss_scale = coordinate_scale**2
     with torch.no_grad():
         initial_cost = float(objective(model()))
-    best_cost = initial_cost
-    best_state = {name: value.detach().clone() for name, value in model.state_dict().items()}
-    history = [{"iteration": 0, "objective_squared": initial_cost,
-                "best_objective_squared": initial_cost, "evaluations": 0}]
-    evaluations, iteration, stalls = 0, 0, 0
-    status = "max_steps"
-    gradient_norm = float("inf")
+    if not np.isfinite(initial_cost):
+        raise FloatingPointError("Nonfinite initial barycenter loss")
+    best_cost, best_gradient = initial_cost, float("inf")
+    best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    best_start = 0
+    history, summaries = [], []
+    evaluations, iteration, restarts = 0, 0, 0
+    local_cost, local_state = initial_cost, best_state
+    parameters = [p for p in model.parameters() if p.requires_grad]
+    current_start = 0
 
-    def closure():
-        nonlocal evaluations, best_cost, best_state, gradient_norm
-        optimizer.zero_grad()
-        value = objective(model())
+    def snapshot():
+        return {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+    def evaluate():
+        nonlocal evaluations, best_cost, best_state, best_start, best_gradient
+        nonlocal local_cost, local_state
+        model.zero_grad(set_to_none=True)
+        value = objective(model())/loss_scale
         if not bool(torch.isfinite(value)):
             raise FloatingPointError("Nonfinite barycenter loss")
         value.backward()
         gradients = torch.cat([p.grad.reshape(-1) for p in parameters if p.grad is not None])
         if not bool(torch.isfinite(gradients).all()):
             raise FloatingPointError("Nonfinite barycenter gradient")
-        gradient_norm = float(gradients.detach().abs().max())
+        norm = float(gradients.detach().abs().max())
+        cost = float(value.detach())*loss_scale
         evaluations += 1
-        cost = float(value.detach())
+        if cost < local_cost:
+            local_cost, local_state = cost, snapshot()
         if cost < best_cost:
-            best_cost = cost
-            best_state = {name: entry.detach().clone() for name, entry in model.state_dict().items()}
-        return value
+            best_cost, best_state, best_start, best_gradient = cost, snapshot(), current_start, norm
+        elif cost == best_cost:
+            best_gradient = norm
+        return value, cost, norm
 
-    for iteration in range(1, steps+1):
-        previous = best_cost
+    def new_lbfgs():
+        return torch.optim.LBFGS(parameters, lr=learning_rate, max_iter=1,
+                                 max_eval=25, history_size=history_size,
+                                 tolerance_grad=tolerance_grad,
+                                 # With max_iter=1, our outer monitor handles
+                                 # small changes. PyTorch also compares g^T d
+                                 # against tolerance_change; 1e-10 otherwise
+                                 # prevents reaching a 1e-7 gradient even on
+                                 # a smooth single-Gaussian objective.
+                                 tolerance_change=0.,
+                                 line_search_fn="strong_wolfe")
+
+    def record(cost, gradient, step, phase):
+        history.append({"iteration": iteration, "start": current_start, "step": step,
+                        "phase": phase, "objective_squared": cost,
+                        "best_objective_squared": best_cost,
+                        "gradient_inf": gradient, "best_gradient_inf": best_gradient,
+                        "evaluations": evaluations, "restarts": restarts})
+
+    def gradient_backtracking():
+        """Try full and block gradient steps before abandoning a start."""
+        nonlocal evaluations, local_cost, local_state, best_cost, best_state, best_start
+        model.load_state_dict(local_state)
+        evaluate()
+        origin, gradients = snapshot(), {n: p.grad.detach().clone()
+                                         for n, p in model.named_parameters() if p.requires_grad}
+        before = local_cost
+        for block in (None, "means", "raw_cholesky", "logits"):
+            if block == "logits" and not learn_weights:
+                continue
+            for rate in (1., .1, .01, .001, .0001, .00001, .000001):
+                model.load_state_dict(origin)
+                with torch.no_grad():
+                    for name, parameter in model.named_parameters():
+                        if name in gradients and (block is None or name == block):
+                            parameter.add_(gradients[name], alpha=-learning_rate*rate)
+                    cost = float(objective(model()))
+                evaluations += 1
+                if np.isfinite(cost) and cost < local_cost:
+                    local_cost, local_state = cost, snapshot()
+                    if cost < best_cost:
+                        best_cost, best_state, best_start = cost, snapshot(), current_start
+        model.load_state_dict(local_state)
+        evaluate()  # Recompute the gradient of the retained candidate.
+        return before-local_cost
+
+    for current_start, candidate in enumerate(starting_points):
+        model = ParameterizedGMM(candidate, coordinate_scale=coordinate_scale,
+                                 learn_weights=learn_weights)
+        parameters = [p for p in model.parameters() if p.requires_grad]
+        local_cost, local_state = float("inf"), snapshot()
+        start_iteration, start_evaluations = iteration, evaluations
+        status, stalls, recoveries = "max_steps", 0, 0
+        step = 0
         try:
-            optimizer.step(closure)
-            with torch.no_grad():
-                cost = float(objective(model()))
+            _, cost, gradient = evaluate()
+            record(cost, gradient, 0, "initial")
+            if warmup_steps:
+                warmup = torch.optim.Adam(parameters, lr=.01)
+                for warm_step in range(1, warmup_steps+1):
+                    # evaluate() has computed gradients at the current point.
+                    warmup.step()
+                    _, cost, gradient = evaluate()
+                    iteration += 1
+                    record(cost, gradient, warm_step, "adam_warmup")
+                model.load_state_dict(local_state)
+                _, cost, gradient = evaluate()
+            optimizer = new_lbfgs()
+            for step in range(1, steps+1):
+                if gradient <= tolerance_grad:
+                    status = "gradient_tolerance"
+                    break
+                previous = local_cost
+                optimizer.step(lambda: evaluate()[0])
+                _, cost, gradient = evaluate()
+                # Synchronize the actual iterate with the lowest line-search
+                # candidate. Its curvature history belongs to another path.
+                if cost > local_cost:
+                    model.load_state_dict(local_state)
+                    optimizer = new_lbfgs()
+                    restarts += 1
+                    _, cost, gradient = evaluate()
+                iteration += 1
+                record(cost, gradient, step, "lbfgs")
+                threshold = tolerance_change*max(loss_scale, abs(previous))
+                stalls = stalls+1 if previous-local_cost <= threshold else 0
+                if stalls >= stall_patience and gradient > tolerance_grad:
+                    if recoveries >= max_restarts:
+                        status = "stalled"
+                        break
+                    gradient_backtracking()
+                    optimizer = new_lbfgs()
+                    recoveries += 1
+                    restarts += 1
+                    stalls = 0
+                    _, cost, gradient = evaluate()
+                    record(cost, gradient, step, "curvature_restart")
+            model.load_state_dict(local_state)
+            _, cost, gradient = evaluate()
+            if gradient <= tolerance_grad:
+                status = "gradient_tolerance"
         except (FloatingPointError, ValueError, RuntimeError) as error:
-            # A failed line search cannot erase a previously feasible candidate.
             status = f"numerical_stop: {type(error).__name__}: {error}"
-            break
-        if cost < best_cost:
-            best_cost = cost
-            best_state = {name: value.detach().clone() for name, value in model.state_dict().items()}
-        history.append({"iteration": iteration, "objective_squared": cost,
-                        "best_objective_squared": best_cost, "evaluations": evaluations})
-        if gradient_norm <= tolerance_grad:
-            status = "gradient_tolerance"
-            break
-        if previous-best_cost <= tolerance_change*max(1., abs(previous)):
-            stalls += 1
-        else:
-            stalls = 0
-        if stalls >= 3:
-            status = "stalled"
-            break
+            gradient = float("inf")
+        summaries.append({"start": current_start, "objective_squared": local_cost,
+                          "gradient_inf": gradient, "status": status,
+                          "iterations": iteration-start_iteration,
+                          "evaluations": evaluations-start_evaluations})
+
+    current_start = best_start
     model.load_state_dict(best_state)
+    _, best_cost, gradient = evaluate()
+    record(best_cost, gradient, 0, "returned_best")
     result = detached_gmm(model())
-    with torch.no_grad():
-        best_cost = float(objective(result))
-    if best_cost > initial_cost + 1e-9*max(1., abs(initial_cost)):
+    if best_cost > initial_cost + 1e-9*max(loss_scale, abs(initial_cost)):
         raise RuntimeError("Best-iterate restoration failed")
+    met = gradient <= tolerance_grad
+    status = "gradient_tolerance" if met else summaries[best_start]["status"]
+    # The final gradient, rather than a line-search trial or start summary,
+    # controls the only gradient-based stopping claim.
+    if status == "gradient_tolerance" and not met:
+        status = "stalled"
     return OptimizationResult(result, initial_cost, best_cost, iteration,
-                              evaluations, status, history)
+                              evaluations, status, history, gradient, met,
+                              len(starting_points), restarts, summaries)
 
 
 def mw2_objective(inputs, weights, candidate):

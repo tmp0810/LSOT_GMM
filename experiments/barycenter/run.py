@@ -23,7 +23,7 @@ from .data import (gaussian_example, synthetic_example, image_example,
 from .plotting import (density_grid, save_panel, save_inputs, save_method_grid,
                        save_comparison, save_convergence, save_perimeter_animation,
                        save_gaussian_overlay)
-from .reference import mw2_barycenter, shared_initialization
+from .reference import mw2_barycenter, shared_initializations
 from .solver import (optimize_barycenter, on_device, mw2_objective,
                      mw2_distance_squared, BarycenterObjective)
 
@@ -91,7 +91,7 @@ def run_case(case, args, root):
     folder.mkdir(parents=True, exist_ok=True)
     settings = {k: v for k, v in vars(args).items()
                 if k not in {"output_dir", "no_resume", "image_dir"}}
-    settings["schema_version"] = 1
+    settings["schema_version"] = 2
     settings["input_components"] = [source.count for source in case.inputs]
     budget = args.barycenter_components or sum(source.count for source in case.inputs)-len(case.inputs)+1
     settings["effective_barycenter_components"] = budget
@@ -109,6 +109,8 @@ def run_case(case, args, root):
     write_json(folder / "data_manifest.json", case.metadata)
     nodes = [(0, 0, None, None, np.ones(3)/3)] if case.name == "gaussian" else grid_nodes(args.grid_size)
     size = 1 if case.name == "gaussian" else args.grid_size
+    if args.center_only and case.name != "gaussian":
+        nodes = [node for node in nodes if node[0] == size//2 and node[1] == size//2]
     (folder / "config.json").write_text(json.dumps(settings, indent=2, default=str)+"\n")
     device_inputs = [on_device(source, args.device) for source in case.inputs]
     kinds = [kind for kind in PROJECTION_KINDS if any(name.endswith("-"+kind) for name in args.methods)]
@@ -149,6 +151,9 @@ def run_case(case, args, root):
                           "initialization_ms": 0., "solve_ms": elapsed, "total_ms": elapsed,
                           "iterations": args.gaussian_iterations, "evaluations": 0,
                           "status": "anchor" if np.count_nonzero(weights) == 1 else "multimarginal_lp",
+                          "gradient_inf": None, "gradient_tolerance_met": None,
+                          "optimizer_starts": 0, "curvature_restarts": 0,
+                          "warmup_steps": 0, "start_summaries": "[]",
                           "marginal_error": solved.marginal_error}
             x, density = density_grid(reference, case.bounds, case.density_grid)
             save_gmm(reference_file, reference, x=x, density=density, input_weights=weights)
@@ -160,7 +165,7 @@ def run_case(case, args, root):
         if "MW2" in args.methods:
             rows.append(ref_record)
             grouped["MW2"].append(ref_record)
-        initialization, initialization_ms = None, 0.
+        initializations, initialization_ms = None, 0.
         for method in args.methods:
             if method == "MW2":
                 continue
@@ -185,30 +190,40 @@ def run_case(case, args, root):
             if anchor:
                 candidate, elapsed, init_value, value = reference, 0., 0., 0.
                 iterations, evaluations, status, history = 0, 0, "anchor", []
+                gradient, gradient_met, starts, restarts, start_summaries = 0., True, 0, 0, []
             else:
-                if initialization is None:
+                if initializations is None:
                     start = time.perf_counter()
-                    initial = shared_initialization(case.inputs, weights, budget,
-                                                    iterations=args.gaussian_iterations, seed=args.seed)
-                    initialization = on_device(initial, args.device)
+                    initializations = [on_device(initial, args.device) for initial in
+                                       shared_initializations(case.inputs, weights, budget,
+                                                              starts=args.starts,
+                                                              iterations=args.gaussian_iterations,
+                                                              seed=args.seed)]
                     synchronize(args.device)
                     initialization_ms = 1000*(time.perf_counter()-start)
                     init_dir = folder / "initializations"
                     init_dir.mkdir(exist_ok=True)
-                    save_gmm(init_dir / f"{tag}.npz", initialization, input_weights=weights)
-                print(f"{case.name} {tag}: {method}, Kb={budget}, L={args.L}", flush=True)
+                    save_gmm(init_dir / f"{tag}.npz", initializations[0], input_weights=weights)
+                    for index, initial in enumerate(initializations):
+                        save_gmm(init_dir / f"{tag}_start{index:02d}.npz", initial, input_weights=weights)
+                print(f"{case.name} {tag}: {method}, Kb={budget}, L={args.L}, "
+                      f"starts={len(initializations)}", flush=True)
                 synchronize(args.device)
                 start = time.perf_counter()
                 result = optimize_barycenter(
-                    device_inputs, weights, initialization, banks[kind], kind, mode,
+                    device_inputs, weights, initializations[0], banks[kind], kind, mode,
                     steps=args.steps, learning_rate=args.learning_rate, history_size=args.history_size,
                     tolerance_grad=args.tolerance_grad, tolerance_change=args.tolerance_change,
                     coordinate_scale=max(1., case.bounds[1]-case.bounds[0]),
-                    learn_weights=not args.freeze_weights)
+                    learn_weights=not args.freeze_weights, initializations=initializations,
+                    stall_patience=args.stall_patience, max_restarts=args.max_restarts,
+                    warmup_steps=args.warmup_steps)
                 synchronize(args.device)
                 elapsed = 1000*(time.perf_counter()-start)
                 candidate, init_value, value = result.gmm, result.initial_objective, result.objective
                 iterations, evaluations, status, history = result.iterations, result.evaluations, result.status, result.history
+                gradient, gradient_met = result.gradient_inf, result.gradient_tolerance_met
+                starts, restarts, start_summaries = result.starts, result.restarts, result.start_summaries
             x, density = density_grid(candidate, case.bounds, case.density_grid)
             d1 = density/density.sum()
             d2 = reference_density/reference_density.sum()
@@ -225,6 +240,10 @@ def run_case(case, args, root):
                       "initialization_ms": 0. if anchor else initialization_ms, "solve_ms": elapsed,
                       "total_ms": elapsed+(0. if anchor else initialization_ms),
                       "iterations": iterations, "evaluations": evaluations, "status": status,
+                      "gradient_inf": gradient, "gradient_tolerance_met": gradient_met,
+                      "optimizer_starts": starts, "curvature_restarts": restarts,
+                      "warmup_steps": args.warmup_steps if not anchor else 0,
+                      "start_summaries": json.dumps(start_summaries),
                       "marginal_error": None}
             save_gmm(gmm_file, candidate, x=x, density=density, input_weights=weights)
             save_panel(method_folder / "images" / f"{tag}.png", x, density, show_axes=args.show_axes)
@@ -232,11 +251,13 @@ def run_case(case, args, root):
             write_json(record_file, record)
             rows.append(record)
             grouped[method].append(record)
-            print(f"  loss {init_value:.6g} -> {value:.6g}; {status}; {elapsed:.1f} ms", flush=True)
+            print(f"  loss {init_value:.6g} -> {value:.6g}; {status}; "
+                  f"grad_inf={gradient:.3g}; {elapsed:.1f} ms", flush=True)
         write_csv(folder / "metrics.csv", rows)
     for method, records in grouped.items():
-        save_method_grid(folder / method, records, size)
-        save_perimeter_animation(folder / method, size, mp4=args.mp4)
+        if not args.center_only or size == 1:
+            save_method_grid(folder / method, records, size)
+            save_perimeter_animation(folder / method, size, mp4=args.mp4)
         if case.name == "gaussian":
             barycenter = load_gmm(folder / method / "barycenters" / "r00_c00.npz")
             save_gaussian_overlay(folder / method, case, barycenter)
@@ -261,7 +282,14 @@ def main(argv=None):
     parser.add_argument("--L", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda", "auto"))
-    parser.add_argument("--steps", type=int, default=80)
+    parser.add_argument("--steps", type=int, default=80, help="L-BFGS outer-step budget per start")
+    parser.add_argument("--starts", type=int, default=4,
+                        help="Shared spatial starts; one for the single-Gaussian case")
+    parser.add_argument("--stall-patience", type=int, default=8)
+    parser.add_argument("--max-restarts", type=int, default=2,
+                        help="Curvature recoveries per start before reporting stalled")
+    parser.add_argument("--warmup-steps", type=int, default=0,
+                        help="Optional Adam warmup per start before L-BFGS; 0 keeps pure L-BFGS")
     parser.add_argument("--learning-rate", type=float, default=1.)
     parser.add_argument("--history-size", type=int, default=10)
     parser.add_argument("--tolerance-grad", type=float, default=1e-7)
@@ -273,6 +301,8 @@ def main(argv=None):
     parser.add_argument("--show-axes", action="store_true", help="Numeric ticks on individual panels, without labels/titles")
     parser.add_argument("--mp4", action="store_true", help="Also export MP4 perimeter movies (requires ffmpeg); GIF is automatic")
     parser.add_argument("--no-resume", action="store_true")
+    parser.add_argument("--center-only", action="store_true",
+                        help="Quick optimizer check at the central grid node; skips full grids and movies")
     preliminary, _ = parser.parse_known_args(argv)
     if preliminary.config:
         supplied = json.loads(preliminary.config.read_text())
@@ -287,9 +317,10 @@ def main(argv=None):
     if args.device == "cuda" and not torch.cuda.is_available():
         parser.error("CUDA requested but unavailable; select a GPU runtime or use --device cpu")
     if (min(args.L, args.gaussian_iterations, args.eval_samples, args.eval_projections,
-            args.image_components, args.threads, args.history_size) < 1
+            args.image_components, args.threads, args.history_size, args.starts, args.stall_patience) < 1
             or args.grid_size < 2 or args.barycenter_components < 0 or args.steps < 0
             or args.seed < 0 or args.learning_rate <= 0 or args.tolerance_grad < 0 or args.tolerance_change < 0
+            or args.max_restarts < 0 or args.warmup_steps < 0
             or len(set(args.methods)) != len(args.methods)):
         parser.error("Invalid counts, optimizer settings, or duplicate methods")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -320,7 +351,10 @@ def main(argv=None):
                               **{key+"_mean": float(np.mean([r[key] for r in values]))
                                  for key in ("total_ms", "objective_squared", "mw2_objective_squared",
                                              "mw2_to_reference", "sw2_to_reference", "density_l1_to_reference")},
-                              "numerical_stops": sum(r["status"].startswith("numerical_stop") for r in values)})
+                              "numerical_stops": sum(r["status"].startswith("numerical_stop") for r in values),
+                              "gradient_tolerance_count": sum(r["gradient_tolerance_met"] is True for r in values),
+                              "stalled_count": sum(r["status"] == "stalled" for r in values),
+                              "max_steps_count": sum(r["status"] == "max_steps" for r in values)})
     write_csv(args.output_dir / "summary.csv", summaries)
     print(f"Saved {len(rows)} method/node results to {args.output_dir}", flush=True)
     return rows

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -97,7 +98,7 @@ def save_comparison(folder, methods, center):
 
 
 def save_convergence(folder, methods, center):
-    fig, ax = plt.subplots(figsize=(7, 4))
+    fig, (ax, gradient_ax) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
     plotted = False
     for method in methods:
         path = folder / method / "history" / f"r{center:02d}_c{center:02d}.csv"
@@ -107,12 +108,32 @@ def save_convergence(folder, methods, center):
         initial = float(rows[0]["best_objective_squared"])
         if initial <= 0:
             continue
-        ax.plot([int(r["iteration"]) for r in rows],
-                [float(r["best_objective_squared"])/initial for r in rows], label=method)
+        iterations = [int(r["iteration"]) for r in rows]
+        line, = ax.plot(iterations,
+                        [float(r["best_objective_squared"])/initial for r in rows], label=method)
+        # The faint trace exposes changes of start and rejected/uphill steps;
+        # the solid trace alone cannot certify convergence.
+        ax.plot(iterations, [float(r["objective_squared"])/initial for r in rows],
+                color=line.get_color(), linestyle=":", alpha=.3)
+        if "gradient_inf" in rows[0]:
+            gradient_ax.semilogy(iterations,
+                                 [max(float(r["best_gradient_inf"]), 1e-16) for r in rows],
+                                 color=line.get_color(), label=method)
+            gradient_ax.semilogy(iterations,
+                                 [max(float(r["gradient_inf"]), 1e-16) for r in rows],
+                                 color=line.get_color(), linestyle=":", alpha=.3)
         plotted = True
     if plotted:
-        ax.set(xlabel="L-BFGS outer iteration", ylabel="Objective / initial objective")
+        ax.set(ylabel="Objective / first initial objective",
+               title="Solid: best evaluated loss; dotted: current loss")
         ax.legend(fontsize=7, ncol=2)
+        settings = json.loads((folder / "config.json").read_text())
+        tolerance = settings.get("tolerance_grad", 1e-7)
+        if tolerance > 0:
+            gradient_ax.axhline(tolerance, color="black", linestyle="--", linewidth=1)
+        gradient_ax.set(xlabel="Optimizer iteration (all starts)",
+                        ylabel="Scaled branch gradient, infinity norm",
+                        title="Gradient at best candidate; dotted: current; dashed: tolerance")
         fig.tight_layout()
         fig.savefig(folder / "center_convergence.png", dpi=170)
     plt.close(fig)

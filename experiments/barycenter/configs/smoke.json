@@ -6,6 +6,8 @@
   "L": 8,
   "seed": 0,
   "steps": 3,
+  "starts": 1,
+  "max_restarts": 0,
   "eval_samples": 128,
   "eval_projections": 16,
   "device": "cpu",

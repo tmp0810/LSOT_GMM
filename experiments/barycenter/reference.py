@@ -96,7 +96,8 @@ def mw2_barycenter(inputs, weights, *, iterations=10):
                            float(masses @ costs), error)
 
 
-def shared_initialization(inputs, weights, component_budget, *, iterations=10, seed=0):
+def shared_initialization(inputs, weights, component_budget, *, iterations=10, seed=0,
+                          direction=None):
     """A method-independent common-quantile initialization; never uses MW2 LP.
 
     Ordering uses a fixed spatial direction, rather than a LSOT family.
@@ -110,7 +111,11 @@ def shared_initialization(inputs, weights, component_budget, *, iterations=10, s
     active = np.flatnonzero(weights > 0)
     selected = [inputs[j] for j in active]
     probabilities, means, covariances = zip(*(arrays(gmm) for gmm in selected))
-    direction = np.arange(1, inputs[0].dimension+1, dtype=float)**.5
+    direction = (np.arange(1, inputs[0].dimension+1, dtype=float)**.5
+                 if direction is None else np.asarray(direction, dtype=float))
+    if (direction.shape != (inputs[0].dimension,) or not np.isfinite(direction).all()
+            or np.linalg.norm(direction) == 0):
+        raise ValueError("Initialization direction must be a finite nonzero spatial vector")
     order = [np.argsort(m @ direction, kind="stable") for m in means]
     cumulative = [np.r_[0., np.cumsum(p[o])[:-1], 1.] for p, o in zip(probabilities, order)]
     edges = np.unique(np.concatenate(cumulative))
@@ -148,3 +153,26 @@ def shared_initialization(inputs, weights, component_budget, *, iterations=10, s
         centers = np.concatenate((centers, (original+perturb)[None]))
         covs = np.concatenate((covs, covs[index:index+1]))
     return GMM.from_numpy(masses, centers, covs)
+
+
+def shared_initializations(inputs, weights, component_budget, *, starts=4,
+                           iterations=10, seed=0):
+    """Same spatial common-quantile starts for every LSOT family/aggregation.
+
+    The first is the historical initialization. Further starts use coordinate
+    axes, an alternating-sign direction, then seeded random directions. No
+    MW2 LP or LSOT projection family is used to choose an initialization.
+    """
+    if starts < 1:
+        raise ValueError("starts must be positive")
+    dimension = inputs[0].dimension
+    directions = [None] + list(np.eye(dimension))
+    directions.append((-1.)**np.arange(dimension))
+    rng = np.random.default_rng(seed)
+    while len(directions) < starts:
+        directions.append(rng.normal(size=dimension))
+    if component_budget == 1:
+        directions = directions[:1]
+    return [shared_initialization(inputs, weights, component_budget,
+                                   iterations=iterations, seed=seed, direction=direction)
+            for direction in directions[:starts]]

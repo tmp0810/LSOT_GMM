@@ -8,6 +8,10 @@
   "L": 100,
   "seed": 0,
   "steps": 80,
+  "starts": 4,
+  "stall_patience": 8,
+  "max_restarts": 2,
+  "warmup_steps": 0,
   "device": "cpu",
   "threads": 1
 }
