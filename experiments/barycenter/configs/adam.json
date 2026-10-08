@@ -5,7 +5,7 @@
   "barycenter_components": 0,
   "grid_size": 7,
   "gaussian_iterations": 10,
-  "L": 100,
+  "L": 500,
   "seed": 0,
   "optimizer": "adam",
   "adam_learning_rate": 0.01,
