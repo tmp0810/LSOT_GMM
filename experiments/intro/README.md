@@ -1,5 +1,63 @@
 # 1D/2D interpolation panels for presentation
 
+## Figure 1: transport plans with marginal distributions
+
+This standalone script reproduces the **type of plot** in Figure 1 of the
+MW2 paper for the original **1D** mixtures. It exports grid W2, MW2, and
+all eight LSOT methods (min first, then avg; Mix, SMix, B, B1D). It does
+not run barycenter optimization or min-opt.
+
+```python
+%cd /content/LSOT_GMM
+!git pull --ff-only origin main
+!python -m pip install -q -e .
+!python -m experiments.intro.plot_transport_plans \
+    --L 100 --seed 0 --grid-size 100 \
+    --output-dir results/intro/transport_plans
+```
+
+The blue curve at the left is the source histogram; the red curve above
+is the target histogram. The heatmap displays the **atom-level joint
+law**, with rows for source positions and columns for target positions:
+
+`gamma(dx,dy) = sum_ij P_ij N_i(dx) delta_{T_ij(x)}(dy)`.
+
+`T_ij` are the existing Gaussian pair maps in `lsot/maps.py`. Multiple
+branches are retained; this is **not** a plot of `Tmean` or a 2-by-2
+component coupling. All panels use the same linear color scale and
+coordinates in [0,1], without the notebook's index-axis factor of 100
+or its arbitrary factor of 10 on the displayed MW2 matrix.
+
+The script computes exact Gaussian probabilities in each grid cell using
+CDF differences. Tails outside [0,1] are folded into endpoint cells, and
+both grid marginals are verified. This avoids the original notebook's
+point-sampling/rounding artifacts, so it is not a pixel-identical copy.
+The W2 reference is an **unregularized OT plan** between these same
+histograms; it is distinct from the regularized grid barycenter used
+below for interpolation figures. No Sinkhorn regularization is used here.
+
+Outputs under the chosen directory:
+
+- `transport_plans_all.png` / `.pdf`: all ten methods, two rows by default.
+- `transport_plans_w2_mw2.png` / `.pdf`: the original W2/MW2 comparison.
+- `methods/<method>/transport_plan.png` / `.pdf`: individual panels.
+- `transport_plans.npz`: all joint matrices, histograms, cell edges,
+  and component plans; rows are source and columns are target.
+- `metrics.csv`: marginal errors, total mass, and cell-center transport
+  costs. Component costs are reported separately in their original geometry.
+- `config.json`: inputs, plotting settings, shared color range and seed.
+
+To use exactly the component plans saved by a previous intro run, add
+`--plans-dir results/intro/plans` and match its `--L` and `--seed`. All
+nine saved 1D plans must be present. Without this option, the tiny
+component problems are solved again using the existing core solvers.
+The script runs on CPU. `--columns 2` produces a taller all-methods figure.
+
+```python
+from IPython.display import Image, display
+display(Image(filename="results/intro/transport_plans/transport_plans_all.png"))
+```
+
 Run from the repository root in Colab:
 
 ```python
@@ -87,3 +145,4 @@ for t in np.load(folder / "sequence.npz")["times"]:
         tag += ".0"
     display(Image(filename=str(folder / f"t_{tag}.png")))
 ```
+
