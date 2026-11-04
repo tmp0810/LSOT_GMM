@@ -1,0 +1,17 @@
+{
+  "output_dir": "results/3dgs_smoke",
+  "include_identity": true,
+  "methods": ["mw2", "min-Mix", "min-SMix", "min-B", "min-B1D", "avg-Mix", "avg-SMix", "avg-B", "avg-B1D"],
+  "retentions": [0.2],
+  "scenes": {
+    "synthetic": {"checkpoint": "results/3dgs_smoke_input/source.ply", "sh_degree": 3}
+  },
+  "solver": {
+    "device": "cpu", "partition": "kd", "block_cap": 4,
+    "projections": 8, "bank_size": 200, "projection_batch": 4,
+    "outer_steps": 2, "bures_steps": 32, "cpu_threads": 1
+  },
+  "timing": {"warmups": 0, "repeats": 1},
+  "evaluation": {"enabled": false},
+  "finetune": {"enabled": false}
+}

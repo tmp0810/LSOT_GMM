@@ -1,0 +1,16 @@
+# PyTorch/torchvision must match the installed CUDA toolkit. setup_env.sh can
+# install the documented 2.4.1/cu124 pair explicitly; it does not replace it silently.
+numpy>=1.24,<3
+scipy>=1.10
+POT>=0.9.4,<0.10
+plyfile>=1.0,<2
+matplotlib>=3.7
+Pillow>=9.5
+tqdm>=4.66
+pybind11>=2.12,<4
+ninja>=1.11
+pytest>=8,<10
+iopath>=0.1.10
+fvcore>=0.1.5
+opencv-python-headless>=4.8
+tensorboard>=2.15
