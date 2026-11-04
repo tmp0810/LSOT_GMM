@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hmw-paper-reproduction"
+version = "0.1.0"
+description = "Cholesky HMW and an audited snapshot of manuscript asset sources"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.24,<3"]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.7", "pypdf>=5", "Pillow>=10"]
+experiments = ["scipy>=1.10", "POT>=0.9", "numba>=0.59", "torch>=2.0", "joblib", "scikit-learn", "cvxopt"]
+native = ["pybind11>=2.11"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
