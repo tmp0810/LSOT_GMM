@@ -1,0 +1,9 @@
+numpy>=1.24,<3
+scipy>=1.10
+POT>=0.9
+numba>=0.59
+torch>=2.0
+joblib
+scikit-learn
+cvxopt
+pybind11>=2.11
