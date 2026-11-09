@@ -1,10 +1,5 @@
 # Kế hoạch thử nghiệm 3DGS: MW2 và LSOT
 
-Ngày rà soát: 2026-11-04. Đây là kế hoạch gốc trước triển khai. Code hiện tại, lệnh chạy và tình trạng kiểm tra được ghi trong README.md và VALIDATION.md; chưa có benchmark scene trên GPU mới.
-
-Source LSOT_GMM được cố định tại commit [c3a71f556bb51d23deed59cccef38a97296514e2](https://github.com/tmp0810/LSOT_GMM/commit/c3a71f556bb51d23deed59cccef38a97296514e2).
-GHAP đối chiếu tại commit [27b3a581c861069cc97e5629e216dc3d1f42a98a](https://github.com/taowang0105/GHAP/tree/27b3a581c861069cc97e5629e216dc3d1f42a98a).
-
 ## 1. Mục tiêu và quyết định chính
 
 Xây dựng một ứng dụng nén scene 3D Gaussian Splatting từ một checkpoint đã huấn luyện. So sánh MW2 chính xác trong từng block với min-LSOT dùng bốn họ projection Mix, SMix, B và B1D. Hỗ trợ thêm LSOT-avg cho cả bốn họ. Dùng GHAP nguyên bản và HMW-local làm baseline ứng dụng.
