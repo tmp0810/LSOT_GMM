@@ -1,0 +1,11 @@
+{
+  "cases": ["gaussian", "synthetic", "images"],
+  "methods": ["MW2", "MW2-variational", "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"],
+  "engine": "fast", "optimizer": "adam", "initialization": "pca-screen",
+  "starts": 1, "steps": 200, "adam_learning_rate": 0.003,
+  "L": 100, "validation_L": 512, "sampling": "fixed",
+  "validate_every": 10, "early_stopping_patience": 0, "relative_tolerance": 0.0001,
+  "refresh_every": 10, "refresh_fraction": 0.25, "checkpoints": [25, 50, 100, 200],
+  "image_components": 12, "barycenter_components": 0, "grid_size": 7,
+  "gaussian_iterations": 10, "seed": 0, "warmup_steps": 0, "device": "auto", "threads": 1
+}

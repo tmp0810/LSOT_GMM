@@ -23,19 +23,28 @@ from .data import (gaussian_example, synthetic_example, image_example,
 from .plotting import (density_grid, save_panel, save_inputs, save_method_grid,
                        save_comparison, save_convergence, save_perimeter_animation,
                        save_gaussian_overlay)
-from .reference import mw2_barycenter, shared_initializations
+from .reference import mw2_barycenter, shared_initializations, screened_initialization
 from .solver import (optimize_barycenter, on_device, mw2_objective,
                      mw2_distance_squared, BarycenterObjective)
 
-METHODS = ("MW2",) + tuple(f"{mode}-LSOT-{kind}"
+LEGACY_METHODS = ("MW2",) + tuple(f"{mode}-LSOT-{kind}"
                            for mode in ("min", "avg") for kind in PROJECTION_KINDS)
+METHODS = LEGACY_METHODS + ("MW2-variational",)
+
+
+def solver_source_hash():
+    digest = hashlib.sha256()
+    for name in ("solver.py", "fast_solver.py", "fast_geometry.py", "reference.py"):
+        digest.update(name.encode())
+        digest.update((Path(__file__).parent / name).read_bytes())
+    return digest.hexdigest()
 
 
 def write_csv(path, rows):
     if not rows:
         return
     with Path(path).open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(stream, fieldnames=list(dict.fromkeys(k for row in rows for k in row)))
         writer.writeheader()
         writer.writerows(rows)
 
@@ -91,7 +100,8 @@ def run_case(case, args, root):
     folder.mkdir(parents=True, exist_ok=True)
     settings = {k: v for k, v in vars(args).items()
                 if k not in {"output_dir", "no_resume", "image_dir"}}
-    settings["schema_version"] = 3
+    settings["schema_version"] = 4
+    settings["solver_sources_sha256"] = solver_source_hash()
     settings["input_components"] = [source.count for source in case.inputs]
     budget = args.barycenter_components or sum(source.count for source in case.inputs)-len(case.inputs)+1
     settings["effective_barycenter_components"] = budget
@@ -113,7 +123,8 @@ def run_case(case, args, root):
         nodes = [node for node in nodes if node[0] == size//2 and node[1] == size//2]
     (folder / "config.json").write_text(json.dumps(settings, indent=2, default=str)+"\n")
     device_inputs = [on_device(source, args.device) for source in case.inputs]
-    kinds = [kind for kind in PROJECTION_KINDS if any(name.endswith("-"+kind) for name in args.methods)]
+    kinds = ([] if args.engine == "fast" else
+             [kind for kind in PROJECTION_KINDS if any(name.endswith("-"+kind) for name in args.methods)])
     banks = {kind: sample_projection_bank(case.inputs[0].dimension, args.L, kind=kind,
                                          seed=args.seed, device=args.device) for kind in kinds}
     for kind, bank in banks.items():
@@ -138,7 +149,8 @@ def run_case(case, args, root):
         if reference is None:
             print(f"{case.name} {tag}: MW2 weights={np.round(weights, 4).tolist()}", flush=True)
             start = time.perf_counter()
-            solved = mw2_barycenter(case.inputs, weights, iterations=args.gaussian_iterations)
+            solved = mw2_barycenter(case.inputs, weights, iterations=args.gaussian_iterations,
+                                    fast=args.engine == "fast", tolerance=args.gaussian_tolerance)
             elapsed = 1000*(time.perf_counter()-start)
             reference = on_device(solved.gmm, args.device)
             ref_record = {"fingerprint": digest, "case": case.name, "row": row, "col": col,
@@ -149,7 +161,9 @@ def run_case(case, args, root):
                           "mw2_objective_squared": mw2_objective(device_inputs, weights, reference),
                           "mw2_to_reference": 0., "sw2_to_reference": 0., "density_l1_to_reference": 0.,
                           "initialization_ms": 0., "solve_ms": elapsed, "total_ms": elapsed,
-                          "iterations": args.gaussian_iterations, "evaluations": 0,
+                          "iterations": solved.covariance_iterations, "evaluations": 0,
+                          "covariance_relative_change": solved.covariance_relative_change,
+                          "covariance_tolerance_met": solved.covariance_tolerance_met,
                           "gradient_evaluations": 0,
                           "status": "anchor" if np.count_nonzero(weights) == 1 else "multimarginal_lp",
                           "gradient_inf": None, "gradient_tolerance_met": None,
@@ -187,7 +201,10 @@ def run_case(case, args, root):
                         save_panel(method_folder / "images" / f"{tag}.png", data["x"], data["density"],
                                    show_axes=args.show_axes)
                     continue
-            mode, _, kind = method.split("-")
+            mode, kind = ("mw2", "") if method == "MW2-variational" else (method.split("-")[0], method.split("-")[2])
+            extra = {"engine": args.engine, "sampling": "fixed" if mode == "mw2" else args.sampling,
+                     "objective_role": "validation" if args.engine == "fast" else "training",
+                     "validation_L": args.validation_L if mode != "mw2" else 0}
             anchor = np.count_nonzero(weights) == 1
             if anchor:
                 candidate, elapsed, init_value, value = reference, 0., 0., 0.
@@ -197,15 +214,22 @@ def run_case(case, args, root):
             else:
                 if initializations is None:
                     start = time.perf_counter()
-                    initializations = [on_device(initial, args.device) for initial in
-                                       shared_initializations(case.inputs, weights, budget,
-                                                              starts=args.starts,
-                                                              iterations=args.gaussian_iterations,
-                                                              seed=args.seed)]
+                    if args.initialization == "pca-screen":
+                        initial, init_info = screened_initialization(case.inputs, weights, budget,
+                                            iterations=args.gaussian_iterations, seed=args.seed)
+                        initializations = [on_device(initial, args.device)]
+                    else:
+                        initializations = [on_device(initial, args.device) for initial in
+                                           shared_initializations(case.inputs, weights, budget,
+                                                                  starts=args.starts,
+                                                                  iterations=args.gaussian_iterations,
+                                                                  seed=args.seed)]
+                        init_info = {"strategy": "historical", "optimizer_starts": len(initializations)}
                     synchronize(args.device)
                     initialization_ms = 1000*(time.perf_counter()-start)
                     init_dir = folder / "initializations"
                     init_dir.mkdir(exist_ok=True)
+                    write_json(init_dir / f"{tag}.json", init_info)
                     save_gmm(init_dir / f"{tag}.npz", initializations[0], input_weights=weights)
                     for index, initial in enumerate(initializations):
                         save_gmm(init_dir / f"{tag}_start{index:02d}.npz", initial, input_weights=weights)
@@ -213,15 +237,27 @@ def run_case(case, args, root):
                       f"starts={len(initializations)}", flush=True)
                 synchronize(args.device)
                 start = time.perf_counter()
-                result = optimize_barycenter(
-                    device_inputs, weights, initializations[0], banks[kind], kind, mode,
-                    steps=args.steps, learning_rate=args.learning_rate, history_size=args.history_size,
-                    tolerance_grad=args.tolerance_grad, tolerance_change=args.tolerance_change,
-                    coordinate_scale=max(1., case.bounds[1]-case.bounds[0]),
-                    learn_weights=not args.freeze_weights, initializations=initializations,
-                    stall_patience=args.stall_patience, max_restarts=args.max_restarts,
-                    warmup_steps=args.warmup_steps, optimizer_kind=args.optimizer,
-                    adam_learning_rate=args.adam_learning_rate)
+                if args.engine == "fast":
+                    from .fast_solver import optimize_fast
+                    result = optimize_fast(device_inputs, weights, initializations[0], kind=kind, mode=mode,
+                        steps=args.steps, learning_rate=args.adam_learning_rate, L=args.L,
+                        validation_L=args.validation_L, seed=args.seed,
+                        sampling="fixed" if mode == "mw2" else args.sampling,
+                        refresh_every=args.refresh_every, refresh_fraction=args.refresh_fraction,
+                        validate_every=args.validate_every, patience=args.early_stopping_patience,
+                        relative_tolerance=args.relative_tolerance,
+                        coordinate_scale=max(1., case.bounds[1]-case.bounds[0]),
+                        learn_weights=not args.freeze_weights, checkpoints=tuple(args.checkpoints))
+                else:
+                    result = optimize_barycenter(
+                        device_inputs, weights, initializations[0], banks[kind], kind, mode,
+                        steps=args.steps, learning_rate=args.learning_rate, history_size=args.history_size,
+                        tolerance_grad=args.tolerance_grad, tolerance_change=args.tolerance_change,
+                        coordinate_scale=max(1., case.bounds[1]-case.bounds[0]),
+                        learn_weights=not args.freeze_weights, initializations=initializations,
+                        stall_patience=args.stall_patience, max_restarts=args.max_restarts,
+                        warmup_steps=args.warmup_steps, optimizer_kind=args.optimizer,
+                        adam_learning_rate=args.adam_learning_rate)
                 synchronize(args.device)
                 elapsed = 1000*(time.perf_counter()-start)
                 candidate, init_value, value = result.gmm, result.initial_objective, result.objective
@@ -229,13 +265,27 @@ def run_case(case, args, root):
                 gradient_evaluations = result.gradient_evaluations
                 gradient, gradient_met = result.gradient_inf, result.gradient_tolerance_met
                 starts, restarts, start_summaries = result.starts, result.restarts, result.start_summaries
+                if args.engine == "fast":
+                    extra.update(validation_ms=result.validation_ms, setup_ms=result.setup_ms,
+                                 selected_step=result.selected_step)
+                    checkpoint_dir = method_folder / "checkpoints" / tag
+                    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                    from .fast_solver import checkpoint_gmm
+                    checkpoint_rows = []
+                    for checkpoint in result.checkpoints:
+                        point = checkpoint_gmm(initializations[0], checkpoint,
+                                               max(1., case.bounds[1]-case.bounds[0]))
+                        target_file = checkpoint_dir / f"step{checkpoint['iteration']:05d}.npz"
+                        save_gmm(target_file, point)
+                        checkpoint_rows.append({k: v for k, v in checkpoint.items() if k != "state"})
+                    write_csv(checkpoint_dir / "checkpoints.csv", checkpoint_rows)
             x, density = density_grid(candidate, case.bounds, case.density_grid)
             d1 = density/density.sum()
             d2 = reference_density/reference_density.sum()
             record = {"fingerprint": digest, "case": case.name, "row": row, "col": col,
                       "tx": tx, "ty": ty, "method": method, "projection": kind, "aggregation": mode,
                       "input_weights": json.dumps(weights.tolist()), "components": candidate.count,
-                      "L": args.L, "barycenter_component_budget": budget,
+                      "L": 0 if mode == "mw2" else args.L, "barycenter_component_budget": budget,
                       "initial_objective_squared": init_value, "objective_squared": value,
                       "mw2_objective_squared": mw2_objective(device_inputs, weights, candidate),
                       "mw2_to_reference": np.sqrt(max(0., mw2_distance_squared(reference, candidate))),
@@ -253,7 +303,7 @@ def run_case(case, args, root):
                       "optimizer": ("anchor" if anchor else "adam" if args.optimizer == "adam"
                                     else "adam_lbfgs" if args.warmup_steps else "lbfgs"),
                       "adam_learning_rate": args.adam_learning_rate if not anchor else None,
-                      "marginal_error": None}
+                      "marginal_error": None, **extra}
             save_gmm(gmm_file, candidate, x=x, density=density, input_weights=weights)
             save_panel(method_folder / "images" / f"{tag}.png", x, density, show_axes=args.show_axes)
             write_csv(method_folder / "history" / f"{tag}.csv", history)
@@ -281,7 +331,18 @@ def main(argv=None):
     parser.add_argument("--config", type=Path)
     parser.add_argument("--cases", nargs="+", choices=("gaussian", "synthetic", "images"),
                         default=["gaussian", "synthetic", "images"])
-    parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
+    parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(LEGACY_METHODS))
+    parser.add_argument("--engine", choices=("legacy", "fast"), default="legacy")
+    parser.add_argument("--initialization", choices=("historical", "pca-screen"), default="historical")
+    parser.add_argument("--sampling", choices=("fixed", "fresh", "partial"), default="fixed")
+    parser.add_argument("--validation-L", type=int, default=512)
+    parser.add_argument("--validate-every", type=int, default=10)
+    parser.add_argument("--refresh-every", type=int, default=10)
+    parser.add_argument("--refresh-fraction", type=float, default=.25)
+    parser.add_argument("--early-stopping-patience", type=int, default=5, help="Validation checks; 0 disables early stopping")
+    parser.add_argument("--relative-tolerance", type=float, default=1e-4)
+    parser.add_argument("--checkpoints", nargs="*", type=int, default=[25, 50, 100, 200])
+    parser.add_argument("--gaussian-tolerance", type=float, default=0., help="0 retains the notebook's fixed Gaussian iteration budget")
     parser.add_argument("--image-dir", type=Path, help="Directory containing original redcross/duck/star/batman PNGs")
     parser.add_argument("--image-components", type=int, default=12)
     parser.add_argument("--barycenter-components", type=int, default=0,
@@ -323,6 +384,17 @@ def main(argv=None):
         parser.set_defaults(**supplied)
     args = parser.parse_args(argv)
     args.output_dir, args.config = Path(args.output_dir), str(args.config) if args.config else None
+    if args.engine == "fast" and (args.optimizer != "adam" or args.starts != 1 or args.warmup_steps):
+        parser.error("Fast engine requires --optimizer adam --starts 1 --warmup-steps 0 (or configs/fast.json)")
+    if args.initialization == "pca-screen" and args.starts != 1:
+        parser.error("PCA screening chooses one start; specify --starts 1")
+    if args.engine == "legacy" and (args.sampling != "fixed" or "MW2-variational" in args.methods):
+        parser.error("Resampling and MW2-variational require --engine fast")
+    if (min(args.validation_L, args.validate_every, args.refresh_every) < 1
+            or not 0 < args.refresh_fraction <= 1 or args.early_stopping_patience < 0
+            or args.relative_tolerance < 0 or args.gaussian_tolerance < 0
+            or any(step < 0 for step in args.checkpoints)):
+        parser.error("Invalid validation/sampling settings")
     if args.device == "auto":
         args.device = "cuda" if torch.cuda.is_available() else "cpu"
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -337,6 +409,15 @@ def main(argv=None):
         parser.error("Invalid counts, optimizer settings, or duplicate methods")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(args.threads)
+    if args.engine == "fast":
+        # Remove one-time optimizer/POT lazy initialization from all per-node timings.
+        from .fast_solver import optimize_fast
+        control = gaussian_example()
+        warm_inputs = [on_device(g, args.device) for g in control.inputs]
+        for mode, kind in [("min", k) for k in PROJECTION_KINDS] + [("mw2", "")]:
+            optimize_fast(warm_inputs, np.ones(len(warm_inputs))/len(warm_inputs), warm_inputs[0],
+                          kind=kind, mode=mode, steps=1, L=2, validation_L=2, patience=0)
+        mw2_barycenter(control.inputs, np.ones(len(control.inputs))/len(control.inputs), fast=True)
     versions = {"python": platform.python_version(), "numpy": np.__version__,
                 "torch": torch.__version__, "device": args.device}
     (args.output_dir / "environment.json").write_text(json.dumps(versions, indent=2)+"\n")

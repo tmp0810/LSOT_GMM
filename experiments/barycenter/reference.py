@@ -18,14 +18,22 @@ def arrays(gmm):
                  (gmm.weights, gmm.means, gmm.covariances))
 
 
-def spd_sqrt(matrix):
+def spd_sqrt(matrix, *, fast=False):
+    if fast and matrix.shape[-1] == 2:
+        matrix = .5*(matrix + np.swapaxes(matrix, -1, -2))
+        determinant = np.maximum(np.linalg.det(matrix), 0)
+        root_det = np.sqrt(determinant)
+        denom = np.sqrt(np.maximum(np.trace(matrix, axis1=-2, axis2=-1)+2*root_det, 0))
+        return (matrix+root_det[..., None, None]*np.eye(2))/np.maximum(
+            denom[..., None, None], np.finfo(float).tiny)
     values, vectors = np.linalg.eigh(.5*(matrix + np.swapaxes(matrix, -1, -2)))
     if np.any(values < -1e-10):
         raise ValueError("Matrix square root requires a positive semidefinite input")
     return (vectors*np.sqrt(np.maximum(values, 0))[..., None, :]) @ np.swapaxes(vectors, -1, -2)
 
 
-def gaussian_barycenters(means, covariances, weights, *, iterations=10, roots=None):
+def gaussian_barycenters(means, covariances, weights, *, iterations=10, roots=None,
+                         fast=False, tolerance=0., return_info=False):
     """Batched notebook GaussianBarycenterW2; axes are (tuple,input,d,...)."""
     means, covariances = np.asarray(means), np.asarray(covariances)
     weights = np.asarray(weights, dtype=float)
@@ -36,17 +44,34 @@ def gaussian_barycenters(means, covariances, weights, *, iterations=10, roots=No
     count, _, dimension = means.shape
     mean = np.einsum("j,tjd->td", weights, means)
     covariance = np.broadcast_to(np.eye(dimension), (count, dimension, dimension)).copy()
-    for _ in range(iterations):
-        root = spd_sqrt(covariance)
+    relative_change = float("inf")
+    for iteration in range(iterations):
+        previous = covariance
+        root = spd_sqrt(covariance, fast=fast)
         middle = root[:, None] @ covariances @ root[:, None]
-        covariance = np.einsum("j,tjab->tab", weights, spd_sqrt(middle))
+        covariance = np.einsum("j,tjab->tab", weights, spd_sqrt(middle, fast=fast))
+        if tolerance or return_info:
+            relative_change = float(np.max(np.linalg.norm(covariance-previous, axis=(-2, -1)) /
+                                    np.maximum(np.linalg.norm(previous, axis=(-2, -1)), 1e-15)))
+            if tolerance and relative_change <= tolerance:
+                break
     covariance = .5*(covariance + np.swapaxes(covariance, -1, -2))
-    roots = spd_sqrt(covariances) if roots is None else roots
-    middle = roots @ covariance[:, None] @ roots
-    cross = np.sqrt(np.maximum(np.linalg.eigvalsh(.5*(middle+np.swapaxes(middle,-1,-2))), 0)).sum(-1)
+    if fast and dimension == 2:
+        cross = np.sqrt(np.maximum(
+            np.einsum("tjab,tba->tj", covariances, covariance)
+            + 2*np.sqrt(np.maximum(np.linalg.det(covariances)*np.linalg.det(covariance)[:, None], 0)), 0))
+    else:
+        roots = spd_sqrt(covariances) if roots is None else roots
+        middle = roots @ covariance[:, None] @ roots
+        cross = np.sqrt(np.maximum(np.linalg.eigvalsh(.5*(middle+np.swapaxes(middle,-1,-2))), 0)).sum(-1)
     trace = np.trace(covariances, axis1=-2, axis2=-1) + np.trace(covariance, axis1=-2, axis2=-1)[:, None]
     costs = ((means-mean[:, None])**2).sum(-1) + trace - 2*cross
-    return mean, covariance, np.maximum(costs, 0) @ weights
+    result = (mean, covariance, np.maximum(costs, 0) @ weights)
+    if return_info:
+        return (*result, {"covariance_iterations": iteration+1,
+                          "covariance_relative_change": relative_change,
+                          "covariance_tolerance_met": bool(relative_change <= tolerance) if tolerance else None})
+    return result
 
 
 @dataclass
@@ -57,9 +82,12 @@ class ReferenceResult:
     ground_costs: np.ndarray
     cost_squared: float
     marginal_error: float
+    covariance_iterations: int = 0
+    covariance_relative_change: float = 0.
+    covariance_tolerance_met: bool | None = None
 
 
-def mw2_barycenter(inputs, weights, *, iterations=10):
+def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.):
     weights = np.asarray(weights, dtype=float)
     if len(weights) != len(inputs) or np.any(weights < 0) or not np.isclose(weights.sum(), 1):
         raise ValueError("Invalid input weights")
@@ -74,8 +102,9 @@ def mw2_barycenter(inputs, weights, *, iterations=10):
     tuples = np.indices(shape).reshape(len(shape), -1).T
     tuple_means = np.stack([means[j][tuples[:, j]] for j in range(len(shape))], axis=1)
     tuple_covariances = np.stack([covariances[j][tuples[:, j]] for j in range(len(shape))], axis=1)
-    centers, covs, costs = gaussian_barycenters(tuple_means, tuple_covariances,
-                                               weights[active], iterations=iterations)
+    centers, covs, costs, info = gaussian_barycenters(tuple_means, tuple_covariances,
+                                               weights[active], iterations=iterations,
+                                               fast=fast, tolerance=tolerance, return_info=True)
     count = len(tuples)
     offsets = np.cumsum((0,) + shape[:-1])
     rows = np.concatenate([tuples[:, j]+offsets[j] for j in range(len(shape))])
@@ -93,11 +122,11 @@ def mw2_barycenter(inputs, weights, *, iterations=10):
     keep = masses > 0
     gmm = GMM.from_numpy(masses[keep], centers[keep], covs[keep])
     return ReferenceResult(gmm, tuples[keep], masses[keep], costs[keep],
-                           float(masses @ costs), error)
+                           float(masses @ costs), error, **info)
 
 
 def shared_initialization(inputs, weights, component_budget, *, iterations=10, seed=0,
-                          direction=None):
+                          direction=None, return_score=False, fast=False):
     """A method-independent common-quantile initialization; never uses MW2 LP.
 
     Ordering uses a fixed spatial direction, rather than a LSOT family.
@@ -128,7 +157,9 @@ def shared_initialization(inputs, weights, component_budget, *, iterations=10, s
                               for o, c in zip(order, cumulative)])
     tm = np.stack([means[j][tuples[:, j]] for j in range(len(selected))], axis=1)
     tc = np.stack([covariances[j][tuples[:, j]] for j in range(len(selected))], axis=1)
-    centers, covs, _ = gaussian_barycenters(tm, tc, np.asarray(weights)[active], iterations=iterations)
+    centers, covs, costs = gaussian_barycenters(tm, tc, np.asarray(weights)[active],
+                                              iterations=iterations, fast=fast)
+    score = float(masses @ costs)
     rng = np.random.default_rng(seed)
     # Moment-preserving merges allow an explicitly smaller component budget.
     while len(masses) > component_budget:
@@ -152,7 +183,44 @@ def shared_initialization(inputs, weights, component_budget, *, iterations=10, s
         masses = np.r_[masses, masses[index]]
         centers = np.concatenate((centers, (original+perturb)[None]))
         covs = np.concatenate((covs, covs[index:index+1]))
-    return GMM.from_numpy(masses, centers, covs)
+    initial = GMM.from_numpy(masses, centers, covs)
+    return (initial, score) if return_score else initial
+
+
+def screened_initialization(inputs, weights, component_budget, *, iterations=10, seed=0):
+    """Select ONE start by a method-independent Gaussian tuple-cost proxy.
+
+    Score is evaluated before budget merges/splits; it is not an LSMT loss.
+    PCA/common-quantile candidates plus the historical direction are screened;
+    no LP is solved. The historical candidate protects the initialization proxy.
+    """
+    weights = np.asarray(weights, dtype=float)
+    if len(weights) != len(inputs) or np.any(weights < 0) or not np.isclose(weights.sum(), 1):
+        raise ValueError("Invalid barycenter input weights")
+    means = np.concatenate([arrays(g)[1] for g in inputs])
+    mass = np.concatenate([w*arrays(g)[0] for g, w in zip(inputs, weights)])
+    center = mass @ means
+    spread = (means-center).T @ (mass[:, None]*(means-center))
+    _, vectors = np.linalg.eigh(spread)
+    # Stable axis fallback for a rotationally ambiguous PCA.
+    values = np.linalg.eigvalsh(spread)
+    if np.ptp(values) <= 1e-12*max(float(np.max(np.abs(values))), 1.):
+        vectors = np.eye(means.shape[1])
+    basis = vectors[:, ::-1].T
+    directions = list(basis)
+    if len(basis) > 1:
+        directions += [(basis[0]+basis[1])/np.sqrt(2), (basis[0]-basis[1])/np.sqrt(2)]
+    directions.append(np.sqrt(np.arange(1, means.shape[1]+1, dtype=float)))
+    if component_budget == 1:
+        directions = directions[:1]
+    candidates = [shared_initialization(inputs, weights, component_budget,
+                  iterations=iterations, seed=seed, direction=v, return_score=True, fast=True)
+                  for v in directions]
+    chosen = int(np.argmin([score for _, score in candidates]))
+    return candidates[chosen][0], {"strategy": "pca_screen", "selected": chosen,
+            "directions": [v.tolist() for v in directions],
+            "proxy_costs": [score for _, score in candidates],
+            "proxy": "Gaussian tuple cost before budget adjustment", "optimizer_starts": 1}
 
 
 def shared_initializations(inputs, weights, component_budget, *, starts=4,

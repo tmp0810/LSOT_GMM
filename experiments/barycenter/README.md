@@ -5,6 +5,37 @@ This experiment follows Julie Delon's
 It retains MW2 and adds **eight** methods: avg/min LSOT with Mix, SMix, B,
 and B1D. 
 
+## Fast solver and fair runtime benchmarks
+
+See [FAST_EXPERIMENT.md](FAST_EXPERIMENT.md) for the new single-start solver,
+fixed/fresh/partial projection banks, fixed validation selection, the additional
+MW2-variational baseline, component-count sweeps, and timing definitions.
+The original MW2 multi-marginal reference and legacy optimizer remain available.
+The code retains `LSOT` method names for compatibility; the paper calls them LSMT.
+
+```bash
+python -m experiments.barycenter.run \
+  --config experiments/barycenter/configs/fast.json \
+  --cases synthetic --device cuda --output-dir results/barycenter_fast
+
+# Same full grid with newly sampled directions at every Adam update:
+python -m experiments.barycenter.run \
+  --config experiments/barycenter/configs/fast.json \
+  --cases synthetic --sampling fresh --device cuda \
+  --output-dir results/barycenter_fast_fresh
+```
+
+`fast.json` is an experiment starting point, not an empirically optimal setting:
+one screened initialization, 200 Adam updates, learning rate .003, training
+L=100, fixed validation L=512. Early stopping is **off** in this preset so that
+short plateaus are not automatically treated as convergence. Set
+`--early-stopping-patience 5` to test stopping after five regular validation
+checks without a relative improvement of 1e-4. All eight LSOT variants work
+with the fast engine; specify `--methods` to include averages.
+
+Each method still saves its grid at `<output>/<case>/<method>/barycenters.png`
+and PDF, individual panels, GMMs, histories and checkpoint GMMs.
+
 ## Optimizer checks and revised solver
 
 ### Adam-only experiment
@@ -28,9 +59,9 @@ python -m experiments.barycenter.compare_optimizers --cases synthetic \
   --seeds 0 1 2 --output-dir results/barycenter_optimizer_comparison
 ```
 
-`adam.json` selects one start, 200 Adam steps, L=100 and no warmup. Override
-`--steps 280` for a longer pure-Adam run, or `--starts 4` for the shared spatial
-starts. The explicit CLI equivalent is `--optimizer adam --steps 200
+`adam.json` selects one start, 500 Adam steps, L=500 and no warmup. Override
+`--steps` and `--L` explicitly for smaller budgets, or `--starts 4` for shared spatial
+starts. The explicit CLI equivalent is `--optimizer adam --steps 500 --L 500
 --starts 1 --adam-learning-rate 0.01`. With Adam, `--steps` counts Adam updates;
 with L-BFGS, it counts outer L-BFGS iterations. Adam rejects a nonzero
 `--warmup-steps` to avoid accidentally running two Adam stages.
