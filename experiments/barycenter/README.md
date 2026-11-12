@@ -190,3 +190,15 @@ and all `start_summaries`; history includes all starts with their identifiers.
 Checkpoint files describe the surviving trajectory. `iterations` is the final
 survivor's update count; `total_updates` includes discarded trajectories.
 For a quick central-node check append `--center-only --methods MW2 min-LSOT-B1D`.
+
+### Image-GMM component scaling
+
+The complete K=5..100 protocol, isolated MW2 resource limits, normalized image
+preprocessing, halving optimizer and pairwise-plan benchmark are documented in
+[SCALING.md](SCALING.md). Run:
+
+```bash
+python -m experiments.barycenter.scaling \
+  --config experiments/barycenter/configs/scaling.json \
+  --device cuda --output-dir results/barycenter_scaling
+```

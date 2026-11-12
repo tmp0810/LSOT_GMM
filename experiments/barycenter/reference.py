@@ -6,6 +6,7 @@ finite problem as create_cost_matrix_from_gmm / solveMMOT in gmmot.py.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 import numpy as np
 from scipy.optimize import linprog
 from scipy.sparse import coo_matrix
@@ -87,7 +88,7 @@ class ReferenceResult:
     covariance_tolerance_met: bool | None = None
 
 
-def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.):
+def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0., timings=None):
     weights = np.asarray(weights, dtype=float)
     if len(weights) != len(inputs) or np.any(weights < 0) or not np.isclose(weights.sum(), 1):
         raise ValueError("Invalid input weights")
@@ -96,15 +97,22 @@ def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.):
         source = inputs[active[0]]
         w, _, _ = arrays(source)
         return ReferenceResult(source, np.arange(source.count)[:, None], w, np.zeros(source.count), 0., 0.)
+    phase_started = time.perf_counter()
     selected = [inputs[j] for j in active]
     probabilities, means, covariances = zip(*(arrays(gmm) for gmm in selected))
     shape = tuple(len(p) for p in probabilities)
     tuples = np.indices(shape).reshape(len(shape), -1).T
     tuple_means = np.stack([means[j][tuples[:, j]] for j in range(len(shape))], axis=1)
     tuple_covariances = np.stack([covariances[j][tuples[:, j]] for j in range(len(shape))], axis=1)
+    if timings is not None:
+        timings["tuple_setup_ms"] = 1000*(time.perf_counter()-phase_started)
+    phase_started = time.perf_counter()
     centers, covs, costs, info = gaussian_barycenters(tuple_means, tuple_covariances,
                                                weights[active], iterations=iterations,
                                                fast=fast, tolerance=tolerance, return_info=True)
+    if timings is not None:
+        timings["gaussian_cost_ms"] = 1000*(time.perf_counter()-phase_started)
+    phase_started = time.perf_counter()
     count = len(tuples)
     offsets = np.cumsum((0,) + shape[:-1])
     rows = np.concatenate([tuples[:, j]+offsets[j] for j in range(len(shape))])
@@ -112,7 +120,12 @@ def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.):
     constraints = coo_matrix((np.ones(len(rows)), (rows, cols)),
                              shape=(sum(shape), count)).tocsr()
     rhs = np.concatenate(probabilities)
+    if timings is not None:
+        timings["constraint_setup_ms"] = 1000*(time.perf_counter()-phase_started)
+    phase_started = time.perf_counter()
     result = linprog(costs, A_eq=constraints, b_eq=rhs, bounds=(0, None), method="highs")
+    if timings is not None:
+        timings["lp_ms"] = 1000*(time.perf_counter()-phase_started)
     if not result.success:
         raise RuntimeError(f"MW2 multi-marginal LP failed: {result.message}")
     masses = np.maximum(result.x, 0)
