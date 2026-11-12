@@ -6,7 +6,7 @@
   "methods": ["MW2", "min-LSOT-B"],
   "weights": [0.25, 0.25, 0.25, 0.25],
   "steps": 200,
-  "probe_steps": [100, 200],
+  "probe_steps": [100, 150],
   "learning_rate": 0.001,
   "sampling": "fixed",
   "L": 256,
