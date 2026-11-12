@@ -15,14 +15,14 @@
     0.25,
     0.25
   ],
-  "steps": 300,
+  "steps": 1000,
   "probe_steps": [
-    100,
-    200
+    300,
+    500
   ],
   "learning_rate": 0.003,
   "sampling": "fixed",
-  "L": 500,
+  "L": 100,
   "validation_L": 512,
   "test_L": 512,
   "test_kinds": [
