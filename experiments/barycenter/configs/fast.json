@@ -1,6 +1,6 @@
 {
-  "cases": ["gaussian", "synthetic", "images"],
-  "methods": ["MW2", "MW2-variational", "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"],
+  "cases": ["synthetic"],
+  "methods": ["MW2", "MW2-variational", "min-LSOT-B1D"],
   "engine": "fast", "optimizer": "adam", "initialization": "pca-screen",
   "starts": 1, "steps": 200, "adam_learning_rate": 0.003,
   "L": 100, "validation_L": 512, "sampling": "fixed",
