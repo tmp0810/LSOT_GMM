@@ -1,6 +1,6 @@
 {
-  "cases": ["gaussian", "synthetic", "images"],
-  "methods": ["MW2", "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"],
+  "cases": ["synthetic"],
+  "methods": ["MW2", "min-LSOT-B1D"],
   "image_components": 12,
   "barycenter_components": 0,
   "grid_size": 7,
