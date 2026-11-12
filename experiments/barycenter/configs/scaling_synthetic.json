@@ -1,0 +1,60 @@
+{
+  "task": "all",
+  "component_counts": [
+    5,
+    10,
+    20,
+    30,
+    50,
+    100
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "methods": [
+    "MW2",
+    "min-LSOT-B"
+  ],
+  "weights": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "steps": 100,
+  "probe_steps": [
+    25,
+    50
+  ],
+  "learning_rate": 0.003,
+  "sampling": "fresh",
+  "L": 100,
+  "validation_L": 512,
+  "test_L": 512,
+  "test_kinds": [
+    "B"
+  ],
+  "validate_every": 10,
+  "checkpoints": [
+    25,
+    50,
+    100
+  ],
+  "evaluate_checkpoints": true,
+  "gaussian_iterations": 100,
+  "gaussian_tolerance": 1e-08,
+  "initialization_iterations": 10,
+  "em_steps": 300,
+  "em_tolerance": 0.001,
+  "timeout_s": 600,
+  "memory_limit_gb": 8,
+  "max_tuples": 0,
+  "device": "auto",
+  "threads": 1,
+  "plan_repeats": 5,
+  "plan_warmups": 1,
+  "data": "synthetic",
+  "synthetic_spread": 0.5
+}

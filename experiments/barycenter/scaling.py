@@ -1,4 +1,4 @@
-"""Image-GMM component scaling: full-tuple MW2 versus halving LSMT.
+"""Synthetic/image GMM component scaling: full-tuple MW2 versus halving LSMT.
 
 Run --config experiments/barycenter/configs/scaling.json. Each barycenter
 solver is isolated; failures never prevent independent methods from running.
@@ -18,7 +18,7 @@ from threadpoolctl import threadpool_limits
 
 from lsot.gaussians import GMM
 from lsot.projections import sample_projection_bank
-from .data import SHAPE_NAMES, bundled_masks, image_cloud, save_gmm, load_gmm
+from .data import SHAPE_NAMES, bundled_masks, image_cloud, save_gmm, load_gmm, synthetic_example
 from .fast_solver import optimize_halving, optimize_fast, checkpoint_gmm, FastObjective, synchronize
 from .reference import shared_initializations, mw2_barycenter
 from .solver import on_device, mw2_objective, mw2_distance_squared
@@ -29,8 +29,59 @@ METHODS = ['MW2'] + [f'{mode}-LSOT-{kind}' for mode in ('min', 'avg')
                     for kind in ('B', 'B1D', 'Mix', 'SMix')]
 
 
+def prepare_synthetic_data(folder, k, seed, args):
+    """Refine the four original synthetic shapes into K distinct components.
+
+    For parent N(m,S), child means are N(m,tau*S), child covariance
+    (1-tau)*S. Parent mass is divided equally among its children. The expected
+    child mixture equals the parent distribution; finite realizations differ.
+    No EM and no replicated identical atoms. Prefix RNG per parent pairs K runs.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    tau = args.synthetic_spread
+    bases = synthetic_example().inputs
+    if k < max(g.count for g in bases) or not 0 < tau < 1:
+        raise ValueError('Synthetic scaling requires K>=4 and 0<synthetic_spread<1')
+    paths, records = [], []
+    for index, base in enumerate(bases):
+        arrays = [t.numpy() for t in (base.weights, base.means, base.covariances)]
+        w, m, c = arrays
+        settings = dict(generator='synthetic_gaussian_refinement_v1', K=k, seed=seed,
+                        input_index=index, spread=tau,
+                        template_sha256=hashlib.sha256(b''.join(a.tobytes() for a in arrays)).hexdigest())
+        path, meta = folder/f'input_{index}.npz', folder/f'input_{index}.json'
+        cached = json.loads(meta.read_text()) if meta.exists() else None
+        if path.exists() and cached and cached['settings'] == settings:
+            info = cached
+        else:
+            tick = time.perf_counter()
+            expected = (k-base.count)*w
+            counts = 1+np.floor(expected).astype(int)
+            order = np.argsort(-(expected-np.floor(expected)), kind='stable')
+            counts[order[:k-int(counts.sum())]] += 1
+            means, covariances, masses = [], [], []
+            for parent, count in enumerate(counts):
+                rng = np.random.default_rng(np.random.SeedSequence([seed, index, parent]))
+                means.append(m[parent]+np.sqrt(tau)*rng.standard_normal((count, 2)) @ np.linalg.cholesky(c[parent]).T)
+                covariances.append(np.repeat(((1-tau)*c[parent])[None], count, axis=0))
+                masses.append(np.full(count, w[parent]/count))
+            g = GMM.from_numpy(np.concatenate(masses), np.concatenate(means), np.concatenate(covariances))
+            elapsed = 1000*(time.perf_counter()-tick)
+            save_gmm(path, g)
+            info = dict(settings=settings, name=f'synthetic_{index}', origin='original_synthetic_parameter_refinement',
+                        parent_counts=counts.tolist(), fit_ms=0., generation_ms=elapsed,
+                        converged=None, iterations=0, warnings=[])
+            write_json(meta, info)
+        paths.append(str(path.resolve())); records.append(info)
+    write_json(folder/'manifest.json', dict(provenance='synthetic_example Gaussian refinements; not image data',
+        domain='same ambient coordinates as original synthetic; Gaussian tails are not clipped', fits=records))
+    return paths, records
+
+
 def prepare_data(folder, k, seed, args):
     """Fit all foreground points in [0,1]^2; shared cached inputs for all solvers."""
+    if getattr(args, 'data', 'images') == 'synthetic':
+        return prepare_synthetic_data(folder, k, seed, args)
     from PIL import Image
     from sklearn.mixture import GaussianMixture
     folder.mkdir(parents=True, exist_ok=True)
@@ -316,7 +367,8 @@ def run(args):
                     result.update(result.get('phase_ms', {}))
                     records[method]=dict(K=k,seed=seed,tuple_count=k**4,
                                          requested_Kb=kb,fit_ms=fit_ms,
-                                         em_all_converged=all(f['converged'] for f in fits),**dict(result, method=method))
+                                         em_all_converged=(all(f['converged'] for f in fits) if args.data == 'images' else None),
+                                         data=args.data, generation_ms=sum(f.get('generation_ms',0.) for f in fits),**dict(result, method=method))
                     print(f"  {method}: {result['status']}, total_ms={result.get('total_ms')}",flush=True)
                     # Persist failures immediately; do not wait for evaluation.
                     write_csv(root/'metrics.csv',rows+list(records.values()))
@@ -326,7 +378,7 @@ def run(args):
                 from .plotting import density_grid,draw_density
                 import matplotlib.pyplot as plt
                 fig,axes=plt.subplots(1,4+len(args.methods),figsize=(3*(4+len(args.methods)),3))
-                for ax,g,name in zip(axes[:4],inputs,SHAPE_NAMES):
+                for ax,g,name in zip(axes[:4],inputs,SHAPE_NAMES if args.data == 'images' else [f'Synthetic {i}' for i in range(4)]):
                     x,d=density_grid(g,(0.,1.),128);draw_density(ax,x,d);ax.set_title(name)
                 for ax,method in zip(axes[4:],args.methods):
                     record=records[method];folder=case/method;ax.set_title(method)
@@ -370,6 +422,8 @@ def main(argv=None):
     parser.add_argument('--worker',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--config',type=Path)
     parser.add_argument('--output-dir',type=Path,default=Path('results/barycenter_scaling'))
+    parser.add_argument('--data',choices=('images','synthetic'),default='images')
+    parser.add_argument('--synthetic-spread',type=float,default=.5)
     parser.add_argument('--task',choices=('all','barycenters','plans'),default='all')
     parser.add_argument('--component-counts',type=int,nargs='+',default=[5,10,20,30,50,100])
     parser.add_argument('--seeds',type=int,nargs='+',default=[0,1,2])
@@ -425,6 +479,8 @@ def main(argv=None):
             or not np.isclose(sum(args.weights),1) or any(s<0 for s in args.checkpoints)):
         parser.error('Invalid settings; use positive four-input weights and 0 < probe1 < probe2 < steps')
     if len(set(args.methods)) != len(args.methods):parser.error('Duplicate methods')
+    if args.data == 'synthetic' and (min(args.component_counts)<4 or not 0<args.synthetic_spread<1 or args.image_dir):
+        parser.error('Synthetic data requires K>=4, 0<synthetic-spread<1, and no image-dir')
     run(args)
 
 

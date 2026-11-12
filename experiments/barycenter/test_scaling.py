@@ -72,3 +72,27 @@ def test_solver_memory_window():
         payload=bytearray(2*1024*1024)
     assert meter.stats['cpu_peak_rss_bytes'] >= meter.stats['cpu_rss_baseline_bytes'] > 0
     assert meter.stats['cuda_peak_allocated_bytes'] == 0
+
+
+def test_synthetic_scaling_distinct_components_mass_and_cache(tmp_path):
+    args = SimpleNamespace(data='synthetic', synthetic_spread=.5)
+    paths, records = prepare_data(tmp_path/'first', 10, 7, args)
+    repeated, same = prepare_data(tmp_path/'second', 10, 7, args)
+    bases = synthetic_example().inputs
+    for i, (path, other) in enumerate(zip(paths, repeated)):
+        a, b = load_gmm(path), load_gmm(other)
+        torch.testing.assert_close(a.means, b.means, rtol=0, atol=0)
+        assert a.count == 10 and len(torch.unique(a.means, dim=0)) == 10
+        assert torch.linalg.eigvalsh(a.covariances).min() > 0
+        offset = 0
+        for parent, n in enumerate(records[i]['parent_counts']):
+            assert float(a.weights[offset:offset+n].sum()) == pytest.approx(float(bases[i].weights[parent]))
+            offset += n
+        assert records[i]['fit_ms'] == 0 and records[i]['converged'] is None
+    times = [Path(p).stat().st_mtime_ns for p in paths]
+    prepare_data(tmp_path/'first', 10, 7, args)
+    assert times == [Path(p).stat().st_mtime_ns for p in paths]
+    changed, _ = prepare_data(tmp_path/'newseed', 10, 8, args)
+    assert not torch.equal(load_gmm(paths[0]).means, load_gmm(changed[0]).means)
+    with pytest.raises(ValueError):
+        prepare_data(tmp_path/'small', 3, 0, args)

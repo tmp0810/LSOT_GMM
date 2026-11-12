@@ -130,3 +130,41 @@ Resume uses existing raw solver results, including prior failures. `--no-resume`
 reruns solver jobs and plans; EM fits remain cached. Different settings or source
 versions require a new output directory to prevent mixing incomparable runs.
 All prior experiment presets are retained unchanged.
+
+## Synthetic K sweep (no image data)
+
+```bash
+python -m experiments.barycenter.scaling \
+  --config experiments/barycenter/configs/scaling_synthetic.json \
+  --device cuda --output-dir results/barycenter_scaling_synthetic
+```
+
+This preset runs MW2 and min-LSOT-B, K=5,10,20,30,50,100 and seeds0,1,2.
+It uses the same halving100/fresh protocol, timing, resource limits, saved
+checkpoints and pairwise-plan benchmarks. `--data synthetic` can also override
+the data choice in other scaling configs. A different output folder is required.
+
+The generator extends the four original 2D synthetic GMMs (3,4,4,3 parents),
+not the four image masks. For every original component (alpha,m,Sigma), it
+allocates n>=1 children, with counts summing to K in each GMM, apportioned
+approximately by the original weights. Each child has mass alpha/n,
+mean m+sqrt(tau)*chol(Sigma)*z, z~N(0,I), and covariance (1-tau)*Sigma.
+The default tau=0.5 is controlled by `--synthetic-spread` (strictly between0 and1).
+Means are distinct almost surely; this does not replicate identical atoms.
+Each parent's expected child-mixture distribution equals the original Gaussian,
+while finite realizations differ. Thus this is a representation-resolution
+benchmark preserving the original shape family in expectation, not a claim
+that increasing K necessarily creates intrinsically harder underlying shapes.
+Seeds are deterministic per input/parent, sharing random prefixes across K.
+No means or Gaussian tails are clipped. Plots retain the original [0,1]^2 window.
+
+Generation time is reported separately as generation_ms; fit_ms is zero and EM
+convergence is null (not applicable). Input NPZs, counts and template hashes
+are cached and shared by all methods. Minimum K is4. `em_steps`, `em_tolerance`
+and `image_dir` do not control synthetic generation; image_dir is rejected for
+this mode to prevent ambiguity. test_kinds defaults to B in this preset.
+
+This is distinct from `experiments.barycenter.run --cases synthetic`, which
+still uses the untouched original 3,4,4,3 GMMs and supports the 7x7 grid. The
+scaling script computes one four-input barycenter per K/seed, at equal weights
+by default, not 49 grid cells.

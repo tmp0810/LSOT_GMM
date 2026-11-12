@@ -202,3 +202,15 @@ python -m experiments.barycenter.scaling \
   --config experiments/barycenter/configs/scaling.json \
   --device cuda --output-dir results/barycenter_scaling
 ```
+
+For the synthetic K sweep with MW2 and min-LSOT-B (no images or EM):
+
+```bash
+python -m experiments.barycenter.scaling \
+  --config experiments/barycenter/configs/scaling_synthetic.json \
+  --device cuda --output-dir results/barycenter_scaling_synthetic
+```
+
+The generator refines the original four synthetic GMMs into K distinct
+components per input; see [SCALING.md](SCALING.md#synthetic-k-sweep-no-image-data)
+for the exact distribution and its distinction from the original 7x7 example.
