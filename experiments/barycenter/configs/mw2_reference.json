@@ -1,5 +1,5 @@
 {
-  "cases": ["gaussian", "synthetic", "images"],
+  "cases": ["synthetic"],
   "methods": ["MW2", "min-LSOT-B1D"],
   "image_components": 12,
   "barycenter_components": 0,
