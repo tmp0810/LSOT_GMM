@@ -224,7 +224,7 @@ def run_case(case, args, root):
                                                                   starts=args.starts,
                                                                   iterations=args.gaussian_iterations,
                                                                   seed=args.seed)]
-                        init_info = {"strategy": "historical", "optimizer_starts": len(initializations)}
+                        init_info = {"strategy": args.initialization, "optimizer_starts": len(initializations)}
                     synchronize(args.device)
                     initialization_ms = 1000*(time.perf_counter()-start)
                     init_dir = folder / "initializations"
@@ -238,8 +238,12 @@ def run_case(case, args, root):
                 synchronize(args.device)
                 start = time.perf_counter()
                 if args.engine == "fast":
-                    from .fast_solver import optimize_fast
-                    result = optimize_fast(device_inputs, weights, initializations[0], kind=kind, mode=mode,
+                    from .fast_solver import optimize_fast, optimize_halving
+                    staged = args.initialization == "halving"
+                    solve = optimize_halving if staged else optimize_fast
+                    options = {"probe_steps": tuple(args.probe_steps)} if staged else {}
+                    result = solve(device_inputs, weights, initializations if staged else initializations[0],
+                        **options, kind=kind, mode=mode,
                         steps=args.steps, learning_rate=args.adam_learning_rate, L=args.L,
                         validation_L=args.validation_L, seed=args.seed,
                         sampling="fixed" if mode == "mw2" else args.sampling,
@@ -268,6 +272,9 @@ def run_case(case, args, root):
                 if args.engine == "fast":
                     extra.update(validation_ms=result.validation_ms, setup_ms=result.setup_ms,
                                  selected_step=result.selected_step)
+                    if args.initialization == "halving":
+                        extra.update(halving_decisions=result.halving_decisions,
+                                     total_updates=result.total_updates, selected_start=result.selected_start)
                     checkpoint_dir = method_folder / "checkpoints" / tag
                     checkpoint_dir.mkdir(parents=True, exist_ok=True)
                     from .fast_solver import checkpoint_gmm
@@ -333,7 +340,9 @@ def main(argv=None):
                         default=["gaussian", "synthetic", "images"])
     parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(LEGACY_METHODS))
     parser.add_argument("--engine", choices=("legacy", "fast"), default="legacy")
-    parser.add_argument("--initialization", choices=("historical", "pca-screen"), default="historical")
+    parser.add_argument("--initialization", choices=("historical", "pca-screen", "halving"), default="historical")
+    parser.add_argument("--probe-steps", nargs=2, type=int, default=[25, 50],
+                        help="Cumulative steps before keeping 2 then 1 starts")
     parser.add_argument("--sampling", choices=("fixed", "fresh", "partial"), default="fixed")
     parser.add_argument("--validation-L", type=int, default=512)
     parser.add_argument("--validate-every", type=int, default=10)
@@ -384,8 +393,12 @@ def main(argv=None):
         parser.set_defaults(**supplied)
     args = parser.parse_args(argv)
     args.output_dir, args.config = Path(args.output_dir), str(args.config) if args.config else None
-    if args.engine == "fast" and (args.optimizer != "adam" or args.starts != 1 or args.warmup_steps):
-        parser.error("Fast engine requires --optimizer adam --starts 1 --warmup-steps 0 (or configs/fast.json)")
+    if args.engine == "fast" and (args.optimizer != "adam" or (args.starts != 1 and args.initialization != "halving") or args.warmup_steps):
+        parser.error("Fast engine requires Adam, no warmup, and one start unless using halving")
+    if args.initialization == "halving" and (
+            args.engine != "fast" or args.starts != 4 or args.early_stopping_patience != 0
+            or not 0 < args.probe_steps[0] < args.probe_steps[1] < args.steps):
+        parser.error("Halving requires fast engine, starts=4, patience=0 and 0 < probe steps < steps")
     if args.initialization == "pca-screen" and args.starts != 1:
         parser.error("PCA screening chooses one start; specify --starts 1")
     if args.engine == "legacy" and (args.sampling != "fixed" or "MW2-variational" in args.methods):

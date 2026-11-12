@@ -158,3 +158,35 @@ notebook display: redcross/duck support matches POT's 128x128 data; original
 star/batman PNG identity cannot be verified. `--image-dir` accepts the four
 original PNGs. Preprocessing uses every nonzero `1-blue` pixel after a vertical
 flip, with no resizing or subsampling, and seeded full-covariance EM.
+
+### Staged historical starts (4 -> 2 -> 1)
+
+```bash
+python -m experiments.barycenter.run \
+  --config experiments/barycenter/configs/halving.json \
+  --cases synthetic --device cuda \
+  --output-dir results/barycenter_halving
+```
+
+This preset keeps MW2 as the main baseline and runs the four min-LSOT families.
+It builds the four original common-quantile initializations (no PCA screening).
+All four run 25 Adam updates; the best two run 25 more; the best one continues
+from update 50 to update 500. Ranking uses the best validated iterate on the
+same fixed independent bank (L=512). The live model and Adam moments are
+preserved, not reset to a checkpoint when promoted. The final returned GMM is
+that survivor's best validated iterate. Fresh L=100 training directions use the
+same per-update seeds across starts. `--sampling fixed` and `partial` also work;
+partial retained directions depend on each start's winners.
+
+Defaults: learning rate 0.003, `--probe-steps 25 50`, `--steps 500`, no early
+stopping. This costs 600 total updates rather than 2000 for four complete starts,
+excluding extra validation/initialization work. Actual wall time includes all
+starts, screening and validation; initialization is included in total_ms.
+No quality or speedup guarantee is assumed. Single-Gaussian cases use one start;
+exact grid corners reuse the inputs. Use a new output directory for each setup.
+
+Each per-node JSON records `halving_decisions`, `selected_start`, `total_updates`
+and all `start_summaries`; history includes all starts with their identifiers.
+Checkpoint files describe the surviving trajectory. `iterations` is the final
+survivor's update count; `total_updates` includes discarded trajectories.
+For a quick central-node check append `--center-only --methods MW2 min-LSOT-B1D`.

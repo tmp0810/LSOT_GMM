@@ -172,3 +172,38 @@ def test_standalone_benchmark_checks_plan_marginals_and_cost_order():
             assert value == pytest.approx(cached, abs=1e-12)
             torch.testing.assert_close(left, source.weights, atol=1e-12, rtol=1e-12)
             torch.testing.assert_close(right, target.weights, atol=1e-12, rtol=1e-12)
+
+
+@pytest.mark.parametrize("sampling", ["fixed", "fresh", "partial"])
+def test_halving_preserves_adam_and_counts_all_work(sampling):
+    from .reference import shared_initializations
+    from .fast_solver import optimize_halving
+    inputs = synthetic_example().inputs
+    initials = shared_initializations(inputs, [.25]*4, 11, starts=4, seed=7)
+    kwargs = dict(kind="B1D", steps=6, L=7, validation_L=13,
+                  validate_every=1, sampling=sampling, refresh_every=2,
+                  checkpoints=(2, 4, 6), patience=0, seed=33)
+    result = optimize_halving(inputs, [.25]*4, initials, probe_steps=(2, 4), **kwargs)
+    single = optimize_fast(inputs, [.25]*4, initials[result.selected_start], **kwargs)
+    torch.testing.assert_close(result.gmm.means, single.gmm.means, rtol=0, atol=0)
+    torch.testing.assert_close(result.gmm.weights, single.gmm.weights, rtol=0, atol=0)
+    torch.testing.assert_close(result.gmm.covariances, single.gmm.covariances, rtol=0, atol=0)
+    assert result.objective == single.objective
+    assert result.total_updates == 4*2+2*2+2 == 14
+    assert result.gradient_evaluations == 15  # all updates + final diagnostic
+    assert sorted(row['iterations'] for row in result.start_summaries) == [2, 2, 4, 6]
+    assert result.starts == 4
+    assert {row['start'] for row in result.history} == set(range(4))
+    assert [len(d['survivors']) for d in result.halving_decisions] == [2, 1]
+    assert result.objective <= min(d for stage in result.halving_decisions
+                                    for d in stage['scores'].values())+1e-12
+
+
+def test_halving_single_gaussian_start():
+    from .fast_solver import optimize_halving
+    inputs = gaussian_example().inputs
+    initial = shared_initialization(inputs, [1/3]*3, 1)
+    result = optimize_halving(inputs, [1/3]*3, [initial], probe_steps=(1, 2),
+                             steps=3, L=3, validation_L=5)
+    assert result.total_updates == 3
+    assert result.starts == 1

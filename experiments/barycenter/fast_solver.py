@@ -136,7 +136,7 @@ class FastResult(OptimizationResult):
     sampling: str
 
 
-def optimize_fast(inputs, weights, initial, *, kind="B1D", mode="min", steps=200,
+def _optimize_fast_stages(inputs, weights, initial, *, stage_steps=(), clock_start=None, kind="B1D", mode="min", steps=200,
                   learning_rate=.003, L=100, validation_L=512, seed=0,
                   sampling="fixed", refresh_every=10, refresh_fraction=.25,
                   validate_every=10, patience=5, relative_tolerance=1e-4,
@@ -160,7 +160,8 @@ def optimize_fast(inputs, weights, initial, *, kind="B1D", mode="min", steps=200
         raise ValueError("MW2-variational has no slices; use sampling=fixed")
     device = initial.weights.device
     synchronize(device)
-    started = time.perf_counter()
+    setup_started = time.perf_counter()
+    started = setup_started if clock_start is None else clock_start
     model = FastParameterizedGMM(initial, coordinate_scale=coordinate_scale, learn_weights=learn_weights)
     optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=learning_rate)
     scale = coordinate_scale**2
@@ -177,7 +178,7 @@ def optimize_fast(inputs, weights, initial, *, kind="B1D", mode="min", steps=200
         objective = cls(inputs, weights, bank, kind, mode)
         validation = cls(inputs, weights, vbank, kind, mode)
     synchronize(device)
-    setup_ms = (time.perf_counter()-started)*1000
+    setup_ms = (time.perf_counter()-setup_started)*1000
     history, saved = [], []
     best_state, best_value, selected_step = None, float("inf"), 0
     validation_ms, evaluations, gradients, stale = 0., 0, 0, 0
@@ -258,12 +259,18 @@ def optimize_fast(inputs, weights, initial, *, kind="B1D", mode="min", steps=200
             previous_winners = getattr(objective, "last_winners", [])
             optimizer.step()
             completed = step
-            if step % validate_every == 0 or step in checkpoints or step == steps:
+            if step % validate_every == 0 or step in checkpoints or step == steps or step in stage_steps:
                 norm = float(torch.stack([p.grad.detach().abs().max() for p in model.parameters()
                                          if p.grad is not None]).max())
                 if not np.isfinite(norm):
                     raise FloatingPointError("Nonfinite parameter gradient")
                 evaluate_checkpoint(step, norm)
+                if step in stage_steps:
+                    # Yield with the model, Adam moments and bank still alive.
+                    yield {"score": best_value, "iterations": completed,
+                           "evaluations": evaluations, "gradient_evaluations": gradients,
+                           "history": history, "validation_ms": validation_ms,
+                           "setup_ms": setup_ms, "status": "stage_complete"}
                 if patience and stale >= patience:
                     status = "validation_plateau"
                     break
@@ -288,7 +295,7 @@ def optimize_fast(inputs, weights, initial, *, kind="B1D", mode="min", steps=200
                     "objective_squared": best_value, "best_objective_squared": best_value,
                     "gradient_inf": gradient, "best_gradient_inf": gradient,
                     "evaluations": evaluations, "gradient_evaluations": gradients})
-    return FastResult(result, initial_validation, best_value, completed, evaluations, status,
+    yield FastResult(result, initial_validation, best_value, completed, evaluations, status,
                       history, gradient, False, 1, 0,
                       [{"start": 0, "iterations": completed, "status": status,
                         "objective_squared": best_value, "selected_step": selected_step}],
@@ -302,3 +309,74 @@ def checkpoint_gmm(initial, checkpoint, coordinate_scale=1., device="cpu"):
         candidate = model()
     return GMM(*(p.detach().to(device).clone() for p in
                  (candidate.weights, candidate.means, candidate.covariances)))
+
+
+def optimize_fast(inputs, weights, initial, **kwargs):
+    """Single uninterrupted Adam solve."""
+    return next(_optimize_fast_stages(inputs, weights, initial, **kwargs))
+
+
+def optimize_halving(inputs, weights, initializations, *, probe_steps=(25, 50), **kwargs):
+    """4 -> 2 -> 1 starts, ranking best fixed-bank validation objectives.
+
+    Stages use cumulative steps and preserve live Adam and projection banks.
+    Fresh directions have identical seeds across starts. Partial banks can
+    diverge because winners depend on each candidate. All work is timed.
+    """
+    steps = kwargs.get("steps", 200)
+    if len(probe_steps) != 2 or not 0 < probe_steps[0] < probe_steps[1] < steps:
+        raise ValueError("Require 0 < probe_steps[0] < probe_steps[1] < steps")
+    if len(initializations) not in (1, 4):
+        raise ValueError("Halving requires four starts (one for a single Gaussian)")
+    if kwargs.get("patience", 0):
+        raise ValueError("Halving requires patience=0")
+    kwargs["patience"] = 0
+    synchronize(initializations[0].weights.device)
+    started = time.perf_counter()
+    workers = {i: _optimize_fast_stages(inputs, weights, initial, stage_steps=probe_steps,
+                                      clock_start=started, **kwargs)
+               for i, initial in enumerate(initializations)}
+    latest, active, decisions = {}, list(workers), []
+    for cut, keep in zip(probe_steps, (2, 1)):
+        for i in active:
+            # A numerical stop can terminate a start before its scheduled cut.
+            if i not in latest or isinstance(latest[i], dict):
+                latest[i] = next(workers[i])
+        def score(i):
+            r = latest[i]
+            return r["score"] if isinstance(r, dict) else r.objective
+        survivors = sorted(active, key=lambda i: (score(i), i))[:keep]
+        decisions.append({"iteration": cut, "scores": {i: score(i) for i in active},
+                          "survivors": survivors})
+        for i in active:
+            if i not in survivors:
+                workers[i].close()
+        active = survivors
+    selected = active[0]
+    result = latest[selected]
+    if isinstance(result, dict):
+        result = next(workers[selected])
+    latest[selected] = result
+    workers[selected].close()
+    histories, summaries = [], []
+    total_evals = total_grads = 0
+    validation_ms = setup_ms = 0.
+    for i, r in latest.items():
+        get = r.get if isinstance(r, dict) else lambda key, r=r: getattr(r, key)
+        histories.extend(dict(row, start=i) for row in get("history"))
+        summaries.append({"start": i, "iterations": get("iterations"),
+                          "status": get("status") if i == selected else "pruned",
+                          "objective_squared": r["score"] if isinstance(r, dict) else r.objective,
+                          "selected": i == selected})
+        total_evals += get("evaluations")
+        total_grads += get("gradient_evaluations")
+        validation_ms += get("validation_ms")
+        setup_ms += get("setup_ms")
+    result.history = sorted(histories, key=lambda row: row["elapsed_ms"])
+    result.starts, result.start_summaries = len(initializations), summaries
+    result.evaluations, result.gradient_evaluations = total_evals, total_grads
+    result.validation_ms, result.setup_ms = validation_ms, setup_ms
+    result.halving_decisions = decisions
+    result.total_updates = sum(row["iterations"] for row in summaries)
+    result.selected_start = selected
+    return result
