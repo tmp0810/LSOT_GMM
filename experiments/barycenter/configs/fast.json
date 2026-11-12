@@ -1,6 +1,6 @@
 {
   "cases": ["synthetic"],
-  "methods": ["MW2", "min-LSOT-B1D"],
+  "methods": ["min-LSOT-B"],
   "engine": "fast", "optimizer": "adam", "initialization": "pca-screen",
   "starts": 1, "steps": 200, "adam_learning_rate": 0.003,
   "L": 100, "validation_L": 512, "sampling": "fresh",
