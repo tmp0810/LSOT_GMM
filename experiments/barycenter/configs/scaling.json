@@ -2,7 +2,7 @@
   "task": "all",
   "data": "images",
   "component_counts": [30],
-  "seeds": [0, 1, 2],
+  "seeds": [0],
   "methods": ["MW2", "min-LSOT-B"],
   "weights": [0.25, 0.25, 0.25, 0.25],
   "steps": 200,
