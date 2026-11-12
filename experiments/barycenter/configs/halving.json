@@ -4,14 +4,13 @@
   ],
   "methods": [
     "MW2",
-    "min-LSOT-B",
-    "min-LSOT-B1D"
+    "min-LSOT-B"
   ],
   "engine": "fast",
   "optimizer": "adam",
   "initialization": "halving",
   "starts": 4,
-  "steps": 500,
+  "steps": 100,
   "adam_learning_rate": 0.003,
   "L": 100,
   "validation_L": 512,
@@ -23,10 +22,7 @@
   "refresh_fraction": 0.25,
   "checkpoints": [
     25,
-    50,
-    100,
-    200,
-    500
+    50
   ],
   "image_components": 12,
   "barycenter_components": 0,
