@@ -1,7 +1,0 @@
-third_party/
-local*.json
-__pycache__/
-.pytest_cache/
-*.pyc
-*.so
-*.log
