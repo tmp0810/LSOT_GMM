@@ -1,7 +1,7 @@
 {
   "task": "all",
   "data": "images",
-  "component_counts": [5, 10, 20, 30, 50, 100],
+  "component_counts": [20,30],
   "seeds": [0, 1, 2],
   "methods": ["MW2", "min-LSOT-B"],
   "weights": [0.25, 0.25, 0.25, 0.25],
