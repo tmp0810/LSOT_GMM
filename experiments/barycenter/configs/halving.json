@@ -1,13 +1,9 @@
 {
   "cases": [
-    "gaussian",
     "synthetic",
-    "images"
   ],
   "methods": [
     "MW2",
-    "min-LSOT-Mix",
-    "min-LSOT-SMix",
     "min-LSOT-B",
     "min-LSOT-B1D"
   ],
