@@ -1,16 +1,12 @@
 {
   "task": "all",
   "component_counts": [
-    5,
-    10,
-    20,
     30
   ],
   "seeds": [
     0
   ],
   "methods": [
-    "MW2",
     "min-LSOT-B"
   ],
   "weights": [
@@ -19,14 +15,14 @@
     0.25,
     0.25
   ],
-  "steps": 100,
+  "steps": 300,
   "probe_steps": [
-    25,
-    50
+    100,
+    200
   ],
   "learning_rate": 0.003,
-  "sampling": "fresh",
-  "L": 100,
+  "sampling": "fixed",
+  "L": 500,
   "validation_L": 512,
   "test_L": 512,
   "test_kinds": [
