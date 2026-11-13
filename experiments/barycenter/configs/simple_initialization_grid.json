@@ -1,5 +1,5 @@
 {
-  "cases": ["synthetic", "images"],
+  "cases": ["gaussian", "synthetic", "images"],
   "component_counts": [10, 30, 50],
   "methods": ["MW2", "greedy_mean_spread0.25"],
   "grid_size": 7,
@@ -7,11 +7,13 @@
   "repeats": 1,
   "steps": null,
   "optimization": {
+    "gaussian": {"sampling": "fixed", "L": 100},
     "images": {"sampling": "partial", "L": 100},
     "synthetic": {"sampling": "partial", "L": 100}
   },
   "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
   "data": {"synthetic_spread": 0.5, "em_steps": 300, "em_tolerance": 0.001},
   "plots": true,
-  "output_dir": "results/simple_initialization_grid_greedy_partial"
+  "output_dir": "results/simple_initialization_grid_with_gaussian"
 }
+
