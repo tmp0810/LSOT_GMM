@@ -120,10 +120,10 @@ def main(argv=None):
         run(settings)
 
 
-def fit_mw2(inputs, config):
+def fit_mw2(inputs, config, weights=WEIGHTS):
     timings = {}
     start = time.perf_counter()
-    solved = mw2_barycenter(inputs, WEIGHTS, iterations=config['gaussian_iterations'],
+    solved = mw2_barycenter(inputs, weights, iterations=config['gaussian_iterations'],
                             tolerance=config['gaussian_tolerance'], fast=True,
                             timings=timings, lp_threads=1)
     timings['total_ms'] = 1000 * (time.perf_counter() - start)

@@ -79,6 +79,13 @@ synthetic. It writes per-phase timings, a runtime comparison, common-scale
 contours, and validation histories. See [SIMPLE_INITIALIZATION.md](SIMPLE_INITIALIZATION.md)
 for settings, output paths, and the initializer ablation.
 
+For the full 7×7 grids on synthetic and images at K=5, 10, and 30:
+
+```bash
+python -m experiments.barycenter.simple_initialization_grid \
+  --config experiments/barycenter/configs/simple_initialization_grid.json
+```
+
 ## Fast solver and fair runtime benchmarks
 
 See [FAST_EXPERIMENT.md](FAST_EXPERIMENT.md) for the new single-start solver,

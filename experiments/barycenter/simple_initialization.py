@@ -70,18 +70,24 @@ def mean_slice_plan(a, b, n):
                       torch.tensor(best.mass), (a.count, b.count))
 
 
-def arithmetic_join(a, b, plan, moment=False, spread=1.):
+def arithmetic_join(a, b, plan, moment=False, spread=1., weights=None):
     """Direct moment averages, avoiding iterative Gaussian barycenters."""
     inputs = a.inputs + b.inputs
     indices = np.column_stack([a.indices[plan.rows.numpy()], b.indices[plan.cols.numpy()]])
     mass = plan.mass.numpy()
     means = np.stack([g.means.numpy()[indices[:, j]] for j, g in enumerate(inputs)], 1)
     covs = np.stack([g.covariances.numpy()[indices[:, j]] for j, g in enumerate(inputs)], 1)
-    mean = means.mean(1)
-    cov = covs.mean(1)
+    omega = np.ones(len(inputs)) if weights is None else np.asarray(weights, dtype=float)
+    uniform = np.all(omega == omega[0])
+    omega = omega/omega.sum()
+    mean = means.mean(1) if uniform else np.einsum('j,tji->ti', omega, means)
+    cov = covs.mean(1) if uniform else np.einsum('j,tjkl->tkl', omega, covs)
     if moment:
         delta = means - mean[:, None]
-        cov += spread * np.einsum('tji,tjk->tik', delta, delta) / len(inputs)
+        if uniform:
+            cov += spread * np.einsum('tji,tjk->tik', delta, delta) / len(inputs)
+        else:
+            cov += spread * np.einsum('j,tji,tjk->tik', omega, delta, delta)
     cross = np.sqrt(np.maximum(np.einsum('tjab,tba->tj', covs, cov) +
                      2*np.sqrt(np.maximum(np.linalg.det(covs)*np.linalg.det(cov)[:, None], 0)), 0))
     costs = ((means-mean[:, None])**2).sum(-1) + np.trace(covs, axis1=-2, axis2=-1) + \
@@ -90,13 +96,16 @@ def arithmetic_join(a, b, plan, moment=False, spread=1.):
     for j, g in enumerate(inputs):
         if np.max(np.abs(np.bincount(indices[:, j], mass, minlength=g.count)-g.weights.numpy())) > 1e-9:
             raise ValueError('Arithmetic tuple marginal error')
-    return TupleCandidate(inputs, indices, mass, result, float(mass @ costs.mean(1)))
+    return TupleCandidate(inputs, indices, mass, result,
+                          float(mass @ (costs.mean(1) if uniform else costs @ omega)))
 
 
-def initialize(inputs, cfg):
+def initialize(inputs, cfg, weights=None):
     kind = cfg['kind']
     if kind == 'baseline':
-        return balanced_search(inputs, **cfg['params'])
+        return balanced_search(inputs, weights=weights, **cfg['params'])
+    if weights is not None and kind != 'greedy':
+        raise ValueError('Weighted initialization supports the greedy and lifted tree strategies')
     if kind == 'quantile':
         vv = directions(cfg['n']) if cfg['n'] != 4 else np.array([[1, 2**.5], [1, 0], [0, 1], [1, -1]])
         candidates = [quantile_candidate(inputs, [g.means.numpy() @ v for g in inputs]) for v in vv]
@@ -108,16 +117,23 @@ def initialize(inputs, cfg):
         vv = [vec[:, 1], vec[:, 0], vec[:, 1]+vec[:, 0], vec[:, 1]-vec[:, 0]]
         candidates = [quantile_candidate(inputs, [g.means.numpy() @ v for g in inputs]) for v in vv]
     else:
+        def merge(x, y, w):
+            plan = (mean_slice_plan(x.gmm, y.gmm, cfg['n']) if kind == 'mean_tree'
+                    else greedy_plan(x.gmm, y.gmm, cfg['geometry']))
+            if cfg.get('representative') in ('arithmetic', 'moment'):
+                return arithmetic_join(x, y, plan, cfg['representative'] == 'moment',
+                                       cfg.get('spread', 1.), weights=w)
+            return join(x, y, plan, w)
+
+        if len(inputs) == 2:
+            a, b = map(singleton, inputs)
+            return merge(a, b, weights), 1
+        omega = np.ones(len(inputs)) if weights is None else np.asarray(weights, dtype=float)
         candidates = []
         for order in [(0, 1, 2, 3), (0, 2, 1, 3), (0, 3, 1, 2)]:
             a, b, c, d = [singleton(inputs[i]) for i in order]
-            def merge(x, y):
-                plan = (mean_slice_plan(x.gmm, y.gmm, cfg['n']) if kind == 'mean_tree'
-                        else greedy_plan(x.gmm, y.gmm, cfg['geometry']))
-                if cfg.get('representative') in ('arithmetic', 'moment'):
-                    return arithmetic_join(x, y, plan, cfg['representative'] == 'moment', cfg.get('spread', 1.))
-                return join(x, y, plan)
-            candidates.append(merge(merge(a, b), merge(c, d)))
+            w = omega[list(order)]
+            candidates.append(merge(merge(a, b, w[:2]), merge(c, d, w[2:]), w))
     return min(candidates, key=lambda c: c.cost), len(candidates)
 
 
@@ -152,9 +168,11 @@ PHASES = (
 )
 
 
-def write_summary(root, rows):
+def write_summary(root, rows, summary_rows=None):
     frame = pd.DataFrame(rows)
     frame.to_csv(root/'metrics.csv', index=False)
+    if summary_rows is not None:
+        frame = pd.DataFrame(summary_rows)
     columns = ('initial_mw2', 'final_mw2', 'total_ms', 'improvement_percent',
                'validation_objective', 'test_min_B', 'relative_mw2_gap',
                'sw2_to_reference', 'density_l1_to_reference',
@@ -170,7 +188,7 @@ def write_summary(root, rows):
     return summary
 
 
-def save_case_plots(out, summary, models):
+def save_case_plots(out, summary, models, *, grid_nodes=None):
     """Compare methods with common contour levels and separate timing scales."""
     preferred = ['MW2'] + [name for name in models if name != 'MW2']
     summary = summary.set_index('name').loc[[n for n in preferred if n in summary['name'].values]]
@@ -178,11 +196,12 @@ def save_case_plots(out, summary, models):
     labels = {'mixed_fast': 'Mixed fast', 'greedy_mean_spread0.25': 'Greedy mean'}
     names = [labels.get(n, n) for n in order]
     fig, ax = plt.subplots(figsize=(max(5, len(order)*1.35), 3.8), layout='constrained')
-    seconds = summary['total_ms_mean']/1000
-    bars = ax.bar(range(len(order)), seconds, yerr=summary['total_ms_std'].fillna(0)/1000, capsize=4)
+    total = 'total_ms' if grid_nodes is None else 'grid_total_ms'
+    seconds = summary[total+'_mean']/1000
+    bars = ax.bar(range(len(order)), seconds, yerr=summary[total+'_std'].fillna(0)/1000, capsize=4)
     ax.bar_label(bars, fmt='%.2f s', padding=4)
     ax.set_xticks(range(len(names)), names, rotation=20 if len(names)>3 else 0)
-    ax.set_ylabel('Total solver time (s)')
+    ax.set_ylabel('Total solver time (s)' if grid_nodes is None else 'Total grid solver time (s)')
     ax.margins(y=.2)
     fig.savefig(out/'runtime.png', dpi=170)
     plt.close(fig)
@@ -196,13 +215,13 @@ def save_case_plots(out, summary, models):
         for key, title in PHASES:
             col = key + '_mean'
             if col in summary:
-                values = summary.loc[group, col].fillna(0).to_numpy()/1000
+                values = summary.loc[group, col].fillna(0).to_numpy()*(grid_nodes or 1)/1000
                 if np.any(values):
                     ax.bar(range(len(group)), values, bottom=base, label=title)
                     base += values
         ax.set_xticks(range(len(group)), [labels.get(n, n) for n in group],
                       rotation=20 if len(group)>3 else 0)
-        ax.set_ylabel('Mean time (s)')
+        ax.set_ylabel('Mean time (s)' if grid_nodes is None else 'Mean time per grid (s)')
         ax.legend(fontsize=8)
     fig.savefig(out/'runtime_breakdown.png', dpi=170)
     plt.close(fig)
@@ -223,12 +242,12 @@ def save_case_plots(out, summary, models):
     plt.close(fig)
 
 
-def fit_initialized(inputs, cfg, optimization):
+def fit_initialized(inputs, cfg, optimization, weights=None):
     tick = time.perf_counter()
-    candidate, count = initialize(inputs, cfg)
-    initial = pad(candidate.gmm, sum(g.count for g in inputs)-3, 0)
+    candidate, count = initialize(inputs, cfg, weights)
+    initial = pad(candidate.gmm, sum(g.count for g in inputs)-len(inputs)+1, 0)
     init_ms = (time.perf_counter()-tick)*1000
-    result, history, stats = solve_mixed(inputs, initial, optimization)
+    result, history, stats = solve_mixed(inputs, initial, optimization, weights)
     return initial, result, history, dict(candidates=count, init_ms=init_ms,
                                          total_ms=(time.perf_counter()-tick)*1000, **stats)
 

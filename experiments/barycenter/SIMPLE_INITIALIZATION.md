@@ -36,6 +36,55 @@ Solver timing excludes input fitting/loading, warmup, evaluation (including
 diagnostic MW2 LPs), plotting, and file writing. MW2 results are used only
 after both min-LSOT-B fits, for evaluation and plotting.
 
+## Full 7×7 grids and component sweep
+
+```bash
+python -m experiments.barycenter.simple_initialization_grid \
+  --config experiments/barycenter/configs/simple_initialization_grid.json
+```
+
+The grid config runs **synthetic and images**, at **K=5, 10, 30** components
+per input GMM and data seed 0. K=30 reuses the bundled input fits; K=5 and 10
+use the scaling experiment's synthetic refinement and image EM fitting. All
+methods share exactly the same four inputs at each K. No download is needed.
+
+Columns vary x, rows vary y; the node weights are
+`[(1-x)(1-y), x(1-y), (1-x)y, xy]`. Corner nodes copy the corresponding
+input, edges fit two inputs, and interior nodes fit four. The weighted
+initializer normalizes weights within each group for its Gaussian
+representative, and uses the original node weights at the final merge.
+Both min-LSOT-B solvers and MW2 use the same node weights. The variational
+component budget is the sum of the active input counts minus the number
+of active inputs plus one. Optimizer settings match the center experiment:
+100 steps for images and 200 for synthetic, for both initializers.
+
+The default is one repeat (882 method/node rows). The full run can take
+tens of minutes on one CPU thread: there are 50 four-input K=30 MW2 LPs
+across the two cases. Rerun the same command to resume from saved nodes.
+Use a separate output directory when changing settings. A quick check:
+
+```bash
+python -m experiments.barycenter.simple_initialization_grid \
+  --cases synthetic --component-counts 5 --steps 1 \
+  --output-dir results/simple_initialization_grid_smoke
+```
+
+The output root is `results/simple_initialization_grid/`:
+
+- `metrics.csv`: one row per node and method, including bilinear weights,
+  measured solve phases, MW2 objective, and independent min-LSOT-B test loss.
+- `summary.csv`: average per fitted node, summed solver time for the entire
+  grid, and speedup relative to MW2. Copied corners do not enter the averages.
+  Standard deviation of total grid time requires multiple repeats.
+- `<case>/K<K>/repeat_00/<method>/barycenters.png` and `.pdf`: full 7×7 grid;
+  the folder also saves the individual GMMs, initializations, and loss history.
+- `<case>/K<K>/comparison.png` and `.pdf`: center cell comparison at shared
+  contour levels. `runtime.png` and `runtime_breakdown.png` report whole-grid
+  timings. `<case>/scaling_runtime.png` compares K values.
+
+Timing excludes data preparation, warmup, evaluation, and rendering. With
+multiple repeats, the displayed grids are from the last repeat.
+
 ## New initializer
 
 1. Consider the three pairings of four input GMMs.

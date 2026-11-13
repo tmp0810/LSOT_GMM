@@ -1,0 +1,13 @@
+{
+  "cases": ["synthetic", "images"],
+  "component_counts": [5, 10, 30],
+  "methods": ["MW2", "mixed_fast", "greedy_mean_spread0.25"],
+  "grid_size": 7,
+  "density_grid": 100,
+  "repeats": 1,
+  "steps": null,
+  "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
+  "data": {"synthetic_spread": 0.5, "em_steps": 300, "em_tolerance": 0.001},
+  "plots": true,
+  "output_dir": "results/simple_initialization_grid"
+}

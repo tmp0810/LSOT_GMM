@@ -28,7 +28,7 @@ class TupleCandidate:
     cost: float
 
 
-def from_tuples(inputs, indices, mass):
+def from_tuples(inputs, indices, mass, weights=None):
     keep = mass > 1e-12
     indices, mass = indices[keep], mass[keep]
     mass = mass / mass.sum()
@@ -36,10 +36,11 @@ def from_tuples(inputs, indices, mass):
         error = np.max(np.abs(np.bincount(indices[:, j], mass, minlength=g.count)-g.weights.numpy()))
         if error > 1e-9:
             raise ValueError(f'Tuple marginal error {error}')
+    omega = np.ones(len(inputs)) if weights is None else np.asarray(weights, dtype=float)
     m, c, cost = gaussian_barycenters(
         np.stack([g.means.numpy()[indices[:, j]] for j, g in enumerate(inputs)], 1),
         np.stack([g.covariances.numpy()[indices[:, j]] for j, g in enumerate(inputs)], 1),
-        np.ones(len(inputs))/len(inputs), iterations=30, fast=True,
+        omega/omega.sum(), iterations=30, fast=True,
     )
     return TupleCandidate(tuple(inputs), indices, mass, GMM.from_numpy(mass, m, c), float(mass @ cost))
 
@@ -73,24 +74,37 @@ def best_plans(a, b, directions, count):
     return result
 
 
-def join(a, b, plan):
+def join(a, b, plan, weights=None):
     ix = np.column_stack([a.indices[plan.rows.numpy()], b.indices[plan.cols.numpy()]])
-    return from_tuples(a.inputs+b.inputs, ix, plan.mass.numpy())
+    return from_tuples(a.inputs+b.inputs, ix, plan.mass.numpy(), weights)
 
 
-def balanced_search(inputs, *, L, banks, width, root_width):
-    """Rank feasible four-input tuple plans built from lifted B projections."""
+def balanced_search(inputs, *, L, banks, width, root_width, weights=None):
+    """Rank feasible tuple plans built from lifted B projections."""
+    omega = np.ones(len(inputs)) if weights is None else np.asarray(weights, dtype=float)
     best = None
     evaluated = 0
+    if len(inputs) == 2:
+        a, b = map(singleton, inputs)
+        for seed in range(banks):
+            for plan in best_plans(a.gmm, b.gmm, bank(L, 3100000 + seed), width):
+                candidate = join(a, b, plan, omega)
+                evaluated += 1
+                if best is None or candidate.cost < best.cost:
+                    best = candidate
+        return best, evaluated
+    if len(inputs) != 4:
+        raise ValueError('Lifted tree needs two or four active inputs')
     for order in [(0, 1, 2, 3), (0, 2, 1, 3), (0, 3, 1, 2)]:
         a, b, c, d = [singleton(inputs[i]) for i in order]
+        w = omega[list(order)]
         for seed in range(banks):
             directions = bank(L, 3100000 + seed)
-            left = [join(a, b, p) for p in best_plans(a.gmm, b.gmm, directions, width)]
-            right = [join(c, d, p) for p in best_plans(c.gmm, d.gmm, directions, width)]
+            left = [join(a, b, p, w[:2]) for p in best_plans(a.gmm, b.gmm, directions, width)]
+            right = [join(c, d, p, w[2:]) for p in best_plans(c.gmm, d.gmm, directions, width)]
             for ab, cd in itertools.product(left, right):
                 for plan in best_plans(ab.gmm, cd.gmm, directions, root_width):
-                    candidate = join(ab, cd, plan)
+                    candidate = join(ab, cd, plan, w)
                     evaluated += 1
                     if best is None or candidate.cost < best.cost:
                         best = candidate
@@ -128,7 +142,7 @@ def covariance_step(covariance, gradient, rate):
     return (result + result.transpose(-1, -2)) / 2
 
 
-def solve_mixed(inputs, initial, cfg):
+def solve_mixed(inputs, initial, cfg, weights=None):
     """Fit min-LSOT-B, selecting the iterate on an independent fixed bank."""
     started = time.perf_counter()
     means = torch.nn.Parameter(initial.means.clone())
@@ -140,8 +154,9 @@ def solve_mixed(inputs, initial, cfg):
     ])
     L = cfg['L']
     directions = bank(L, 0)
-    train = FastObjective(inputs, [.25] * 4, directions, 'B', 'min')
-    validation = FastObjective(inputs, [.25] * 4, bank(512, 1000003), 'B', 'min')
+    omega = [1/len(inputs)] * len(inputs) if weights is None else weights
+    train = FastObjective(inputs, omega, directions, 'B', 'min')
+    validation = FastObjective(inputs, omega, bank(512, 1000003), 'B', 'min')
     best, state, selected, history = float('inf'), None, 0, []
 
     def candidate():
