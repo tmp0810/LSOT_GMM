@@ -5,6 +5,42 @@ This experiment follows Julie Delon's
 It retains MW2 and adds **eight** methods: avg/min LSOT with Mix, SMix, B,
 and B1D. 
 
+## Mixed fast: reproduce the two K=30 runs
+
+From the repository root:
+
+```bash
+python -m pip install -e .
+python -m experiments.barycenter.mixed_fast
+# Run a single case once:
+python -m experiments.barycenter.mixed_fast --cases synthetic --repeats 1
+```
+
+This CPU experiment uses one thread and the bundled GMMs from data seed 0:
+four equally weighted inputs with 30 components each, and a barycenter
+budget of 117 components. The images case uses GMMs fitted to the bundled
+redcross, duck, star, and batman masks. The synthetic case uses the
+component refinement experiment with spread 0.5. Input fitting is already
+done; no downloads are needed at runtime.
+
+The lifted tree scores feasible tuple plans and chooses one initializer.
+Optimization uses min-LSOT-B with Adam for means and weight logits and
+affine-invariant Riemannian steps for covariance. Images uses 100 steps and
+64 training directions (partial refresh); synthetic uses 200 steps and 256
+fixed training directions. Both select a checkpoint on an independent bank of
+512 directions. The saved MW2 reference is used only to report metrics.
+
+| Case | MW2 objective at initialization | MW2 objective after optimization |
+|---|---:|---:|
+| Images | 0.013402 | 0.013068 |
+| Synthetic | 0.018581 | 0.017763 |
+
+The default runs each case three times. Results go to
+`results/mixed_fast/metrics.csv`, with settings in `settings.json` and
+the initial and optimized GMMs and validation history in each case's
+subdirectory. `total_ms` includes initialization, optimizer setup and steps,
+and checkpoint selection. It excludes input loading and post-run metrics.
+
 ## Fast solver and fair runtime benchmarks
 
 See [FAST_EXPERIMENT.md](FAST_EXPERIMENT.md) for the new single-start solver,
