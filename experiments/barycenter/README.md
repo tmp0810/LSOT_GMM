@@ -11,9 +11,10 @@ From the repository root:
 
 ```bash
 python -m pip install -e .
-python -m experiments.barycenter.mixed_fast
+python -m experiments.barycenter.mixed_fast --config experiments/barycenter/configs/mixed_fast.json
 # Run a single case once:
-python -m experiments.barycenter.mixed_fast --cases synthetic --repeats 1
+python -m experiments.barycenter.mixed_fast --config experiments/barycenter/configs/mixed_fast.json \
+  --cases synthetic --repeats 1
 ```
 
 This CPU experiment uses one thread and the bundled GMMs from data seed 0:
@@ -35,11 +36,17 @@ fixed training directions. Both select a checkpoint on an independent bank of
 | Images | 0.013402 | 0.013068 |
 | Synthetic | 0.018581 | 0.017763 |
 
-The default runs each case three times. Results go to
+Edit [`configs/mixed_fast.json`](configs/mixed_fast.json) to set the cases,
+repeats, and per-case initialization and optimization settings. The config
+defaults to both cases and three repeats. Results go to
 `results/mixed_fast/metrics.csv`, with settings in `settings.json` and
 the initial and optimized GMMs and validation history in each case's
-subdirectory. `total_ms` includes initialization, optimizer setup and steps,
-and checkpoint selection. It excludes input loading and post-run metrics.
+subdirectory. Each case also saves `comparison.png` and `comparison.pdf`
+(MW2 reference, initialization, and optimized barycenter on shared axes and
+contour levels) and `convergence.png` (validation objective and selected step).
+Set `"plots": false` or pass `--no-plots` to skip the plots.
+`total_ms` includes initialization, optimizer setup and steps, and checkpoint
+selection. It excludes input loading, post-run metrics, and plotting.
 
 ## Fast solver and fair runtime benchmarks
 

@@ -1,0 +1,16 @@
+{
+  "cases": ["images", "synthetic"],
+  "repeats": 3,
+  "output_dir": "results/mixed_fast",
+  "plots": true,
+  "settings": {
+    "images": {
+      "initialization": {"L": 1024, "banks": 1, "width": 3, "root_width": 3},
+      "optimization": {"rate": 1.0, "sampling": "partial", "mean": 0.000001, "mass": 0.01, "steps": 100, "L": 64}
+    },
+    "synthetic": {
+      "initialization": {"L": 256, "banks": 1, "width": 2, "root_width": 2},
+      "optimization": {"rate": 10.0, "sampling": "fixed", "mean": 0.000001, "mass": 0.01, "steps": 200, "L": 256}
+    }
+  }
+}
