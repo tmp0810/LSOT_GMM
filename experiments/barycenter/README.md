@@ -67,6 +67,18 @@ and file writing. Set `"benchmark_mw2": false` or pass `--skip-mw2` to use the
 bundled reference without measuring MW2 time. Set `"plots": false` or pass
 `--no-plots` to skip plots.
 
+## Greedy mean initialization benchmark
+
+```bash
+python -m experiments.barycenter.simple_initialization \
+  --config experiments/barycenter/configs/simple_initialization.json
+```
+
+This runs MW2 and both min-LSOT-B initializers at K=30, seed 0, on images and
+synthetic. It writes per-phase timings, a runtime comparison, common-scale
+contours, and validation histories. See [SIMPLE_INITIALIZATION.md](SIMPLE_INITIALIZATION.md)
+for settings, output paths, and the initializer ablation.
+
 ## Fast solver and fair runtime benchmarks
 
 See [FAST_EXPERIMENT.md](FAST_EXPERIMENT.md) for the new single-start solver,

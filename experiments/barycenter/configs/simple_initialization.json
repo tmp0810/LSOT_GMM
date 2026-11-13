@@ -1,0 +1,9 @@
+{
+  "cases": ["images", "synthetic"],
+  "names": ["mixed_fast", "greedy_mean_spread0.25"],
+  "repeats": 3,
+  "benchmark_mw2": true,
+  "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
+  "plots": true,
+  "output_dir": "results/simple_initialization_confirm"
+}
