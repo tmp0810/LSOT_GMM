@@ -1,14 +1,14 @@
 {
   "cases": ["synthetic", "images"],
-  "component_counts": [5, 10, 30],
+  "component_counts": [10, 30, 50],
   "methods": ["MW2", "greedy_mean_spread0.25"],
   "grid_size": 7,
   "density_grid": 100,
   "repeats": 1,
   "steps": null,
   "optimization": {
-    "images": {"sampling": "partial", "L": 64},
-    "synthetic": {"sampling": "partial", "L": 128}
+    "images": {"sampling": "partial", "L": 100},
+    "synthetic": {"sampling": "partial", "L": 100}
   },
   "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
   "data": {"synthetic_spread": 0.5, "em_steps": 300, "em_tolerance": 0.001},
