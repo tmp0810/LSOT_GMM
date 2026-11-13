@@ -1,4 +1,4 @@
-"""Bilinear barycenter grids with full MW2 and two min-LSOT-B initializers."""
+"""Bilinear barycenter grids with full MW2 and greedy min-LSOT-B."""
 import argparse
 import json
 from pathlib import Path
@@ -59,6 +59,16 @@ def parse_args(argv=None):
     steps = config['steps']
     if steps is not None and (type(steps) is not int or steps < 1):
         parser.error('steps must be a positive integer')
+    overrides = config['optimization']
+    if not isinstance(overrides, dict) or set(overrides)-{'images', 'synthetic'}:
+        parser.error('optimization must contain per-case settings for images or synthetic')
+    for case, settings in overrides.items():
+        if not isinstance(settings, dict) or set(settings)-{'L', 'sampling'}:
+            parser.error(f'optimization.{case} accepts only L and sampling')
+        if 'L' in settings and (type(settings['L']) is not int or settings['L'] < 4):
+            parser.error(f'optimization.{case}.L must be an integer >= 4')
+        if 'sampling' in settings and settings['sampling'] not in ('fixed', 'partial'):
+            parser.error(f'optimization.{case}.sampling must be fixed or partial')
     for key in ('mw2', 'data'):
         if not isinstance(config[key], dict) or config[key].keys()-defaults[key].keys():
             parser.error(f'Invalid {key} options')
@@ -125,7 +135,7 @@ def write_tables(root, records):
 def run_grid(root, case, k, config, settings):
     root.mkdir(parents=True, exist_ok=True)
     inputs, provenance = load_inputs(root, case, k, config)
-    optimization = dict(settings['optimization'])
+    optimization = settings['optimization'] | config['optimization'].get(case, {})
     if config['steps'] is not None:
         optimization['steps'] = config['steps']
     options = {c['name']: c for c in configurations(settings['initialization'])}

@@ -53,12 +53,18 @@ Columns vary x, rows vary y; the node weights are
 input, edges fit two inputs, and interior nodes fit four. The weighted
 initializer normalizes weights within each group for its Gaussian
 representative, and uses the original node weights at the final merge.
-Both min-LSOT-B solvers and MW2 use the same node weights. The variational
+Greedy min-LSOT-B and MW2 use the same node weights. The variational
 component budget is the sum of the active input counts minus the number
-of active inputs plus one. Optimizer settings match the center experiment:
-100 steps for images and 200 for synthetic, for both initializers.
+of active inputs plus one. The main config uses partial direction refresh
+for both cases (25% replaced every 10 steps, retaining the winning directions).
+Images uses 64 training directions and 100 steps; synthetic uses 128 training
+directions and 200 steps. Both use the same covariance update as the center
+experiment and choose a checkpoint on a fixed 512-direction validation bank.
+The per-case `optimization` entries override the inherited training bank
+size and sampling mode. These settings were selected from the K=30 center
+sweep, rather than an exhaustive grid search.
 
-The default is one repeat (882 method/node rows). The full run can take
+The default is one repeat (588 method/node rows). The full run can take
 tens of minutes on one CPU thread: there are 50 four-input K=30 MW2 LPs
 across the two cases. Rerun the same command to resume from saved nodes.
 Use a separate output directory when changing settings. A quick check:
@@ -69,7 +75,7 @@ python -m experiments.barycenter.simple_initialization_grid \
   --output-dir results/simple_initialization_grid_smoke
 ```
 
-The output root is `results/simple_initialization_grid/`:
+The output root is `results/simple_initialization_grid_greedy_partial/`:
 
 - `metrics.csv`: one row per node and method, including bilinear weights,
   measured solve phases, MW2 objective, and independent min-LSOT-B test loss.
