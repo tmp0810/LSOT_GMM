@@ -5,7 +5,7 @@ This experiment follows Julie Delon's
 It retains MW2 and adds **eight** methods: avg/min LSOT with Mix, SMix, B,
 and B1D. 
 
-## Mixed fast: reproduce the two K=30 runs
+## Mixed fast: compare min-LSOT-B and MW2 at K=30
 
 From the repository root:
 
@@ -29,7 +29,12 @@ Optimization uses min-LSOT-B with Adam for means and weight logits and
 affine-invariant Riemannian steps for covariance. Images uses 100 steps and
 64 training directions (partial refresh); synthetic uses 200 steps and 256
 fixed training directions. Both select a checkpoint on an independent bank of
-512 directions. The saved MW2 reference is used only to report metrics.
+512 directions. The same command also computes the MW2 reference from scratch
+for each repeat, using the same four inputs and one CPU thread (including
+HiGHS). MW2 enumerates all 810,000 tuples (30 to the fourth power), computes their Gaussian
+costs, and solves the multi-marginal LP. Its solution is only used to compare
+quality; it is never passed to the mixed solver. The default MW2 settings are
+at most 100 covariance iterations with relative tolerance `1e-8`.
 
 | Case | MW2 objective at initialization | MW2 objective after optimization |
 |---|---:|---:|
@@ -38,15 +43,29 @@ fixed training directions. Both select a checkpoint on an independent bank of
 
 Edit [`configs/mixed_fast.json`](configs/mixed_fast.json) to set the cases,
 repeats, and per-case initialization and optimization settings. The config
-defaults to both cases and three repeats. Results go to
-`results/mixed_fast/metrics.csv`, with settings in `settings.json` and
-the initial and optimized GMMs and validation history in each case's
-subdirectory. Each case also saves `comparison.png` and `comparison.pdf`
-(MW2 reference, initialization, and optimized barycenter on shared axes and
-contour levels) and `convergence.png` (validation objective and selected step).
-Set `"plots": false` or pass `--no-plots` to skip the plots.
-`total_ms` includes initialization, optimizer setup and steps, and checkpoint
-selection. It excludes input loading, post-run metrics, and plotting.
+defaults to both cases and three repeats. Under `results/mixed_fast/`:
+
+- `metrics.csv`: one row per case, method, and repeat. For MW2,
+  `tuple_setup_ms`, `gaussian_cost_ms`, `constraint_setup_ms`, and `lp_ms`
+  break down solver time. For min-LSOT-B, `init_ms` and `optimizer_ms`
+  break down solver time.
+- `summary.csv`: means and sample standard deviations by case and method;
+  `speedup_vs_mw2` is mean MW2 time divided by mean time of that method in
+  the same case. A single repeat has no sample standard deviation.
+- `settings.json`: resolved settings. Each case subdirectory has the saved
+  MW2 (`mw2.npz`), initial and optimized GMMs, and validation history.
+- `comparison.png` / `comparison.pdf`: MW2 reference, initialization, and
+  optimized barycenter on shared contour levels. `convergence.png` shows
+  validation and the selected step. `runtime.png` compares mean solver time
+  and shows standard deviations when available.
+
+The repeats run sequentially after a small untimed warmup for each solver.
+`total_ms` includes each method's entire solve: tuple/cost/constraint setup,
+LP, and GMM construction for MW2; initialization, optimization, and checkpoint
+selection for min-LSOT-B. It excludes input loading, warmup, metrics, plotting,
+and file writing. Set `"benchmark_mw2": false` or pass `--skip-mw2` to use the
+bundled reference without measuring MW2 time. Set `"plots": false` or pass
+`--no-plots` to skip plots.
 
 ## Fast solver and fair runtime benchmarks
 

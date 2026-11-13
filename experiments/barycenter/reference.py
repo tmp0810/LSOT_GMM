@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
+import warnings
 import numpy as np
-from scipy.optimize import linprog
+from scipy.optimize import OptimizeWarning, linprog
 from scipy.sparse import coo_matrix
 
 from lsot.gaussians import GMM
@@ -88,7 +89,8 @@ class ReferenceResult:
     covariance_tolerance_met: bool | None = None
 
 
-def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0., timings=None):
+def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.,
+                   timings=None, lp_threads=None):
     weights = np.asarray(weights, dtype=float)
     if len(weights) != len(inputs) or np.any(weights < 0) or not np.isclose(weights.sum(), 1):
         raise ValueError("Invalid input weights")
@@ -123,7 +125,14 @@ def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0., 
     if timings is not None:
         timings["constraint_setup_ms"] = 1000*(time.perf_counter()-phase_started)
     phase_started = time.perf_counter()
-    result = linprog(costs, A_eq=constraints, b_eq=rhs, bounds=(0, None), method="highs")
+    options = {} if lp_threads is None else {"threads": lp_threads}
+    with warnings.catch_warnings():
+        if lp_threads is not None:
+            # SciPy forwards this native HiGHS option but may warn about it.
+            warnings.filterwarnings("ignore", r"Unrecognized options detected:.*threads.*",
+                                    OptimizeWarning)
+        result = linprog(costs, A_eq=constraints, b_eq=rhs, bounds=(0, None),
+                         method="highs", options=options)
     if timings is not None:
         timings["lp_ms"] = 1000*(time.perf_counter()-phase_started)
     if not result.success:

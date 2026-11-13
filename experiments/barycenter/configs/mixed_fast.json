@@ -3,6 +3,8 @@
   "repeats": 3,
   "output_dir": "results/mixed_fast",
   "plots": true,
+  "benchmark_mw2": true,
+  "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
   "settings": {
     "images": {
       "initialization": {"L": 1024, "banks": 1, "width": 3, "root_width": 3},
