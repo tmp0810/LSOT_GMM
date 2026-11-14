@@ -1,0 +1,27 @@
+{
+  "images": ["ground1013_small.png", "Fabric-02.png", "Rdesign5.png"],
+  "image_dir": "data/texture/stori",
+  "output_dir": "results/texture",
+  "component_counts": [10, 30, 50],
+  "seeds": [0],
+  "methods": [
+    "MW2",
+    "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D",
+    "avg-LSOT-Mix", "avg-LSOT-SMix", "avg-LSOT-B", "avg-LSOT-B1D"
+  ],
+  "L": 100,
+  "patch_size": 3,
+  "max_side": 256,
+  "fit_patches": 10000,
+  "em_iterations": 150,
+  "em_tolerance": 0.001,
+  "em_regularization": 0.000001,
+  "sw_samples": 2048,
+  "w_samples": 256,
+  "eval_directions": 128,
+  "batch_size": 4096,
+  "timing_repeats": 3,
+  "threads": 1,
+  "download": true,
+  "plots": true
+}

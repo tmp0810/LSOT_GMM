@@ -26,6 +26,7 @@ include = ["lsot*", "param_proj*", "distribution_proj*", "experiments*"]
 
 [tool.setuptools.package-data]
 "experiments.color_transfer" = ["configs/*.json", "wikiart/*.txt"]
+"experiments.texture" = ["configs/*.json", "assets/*.json"]
 "experiments.barycenter" = [
   "configs/*.json", "assets/*.json",
   "assets/mixed_fast/*/inputs/*.npz", "assets/mixed_fast/*/MW2/*.npz",

@@ -1,0 +1,14 @@
+{
+  "images": ["ground1013_small.png"],
+  "output_dir": "results/texture_smoke",
+  "component_counts": [4],
+  "L": 8,
+  "max_side": 48,
+  "fit_patches": 768,
+  "em_iterations": 40,
+  "sw_samples": 256,
+  "w_samples": 64,
+  "eval_directions": 32,
+  "batch_size": 256,
+  "timing_repeats": 1
+}
