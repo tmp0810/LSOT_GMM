@@ -1,6 +1,6 @@
 {
   "cases": ["synthetic", "images"],
-  "component_counts": [10, 30, 50],
+  "component_counts": [10, 30, 50, 100],
   "methods": ["MW2", "greedy_mean_spread0.25"],
   "grid_size": 7,
   "density_grid": 100,
