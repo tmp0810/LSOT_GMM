@@ -130,6 +130,7 @@ def summarize(root, records, timings, adsn_records):
     groups = frame.groupby(["K", "method"], sort=False)
     summary = groups[fields].agg(["mean", "std"])
     summary.columns = ["_".join(col) for col in summary.columns]
+    summary["transport_time"] = summary["plan_ms_mean"]
     summary["runs"] = groups.size()
     summary["em_converged_runs"] = groups["em_converged"].sum()
     summary.reset_index(inplace=True)
@@ -232,11 +233,6 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
                 error = result.plan.marginal_error(source, target)
                 if not np.isfinite(error) or error > 1e-8:
                     raise ValueError(f"{name} seed={seed} K={k} {m}: invalid plan marginals ({error})")
-                plan_cost = result.plan_cost_squared
-                if plan_cost is None:
-                    # avg-LSOT can return its plan without evaluating costs.
-                    # This diagnostic is deliberately outside the plan timer.
-                    plan_cost = float(result.plan.cost(source, target))
                 median = {phase: float(np.median([t[phase] for t in times[m]]))
                           for phase in times[m][0]}
                 quality = eval_image(result.image)
@@ -249,7 +245,7 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
                            target_fit_ms=fit[1]["fit_ms"], fit_ms=fit_ms, bank_ms=bank_ms,
                            total_ms=prepare_ms+fit_ms+bank_ms+median["method_ms"],
                            plan_nnz=result.plan.nnz, plan_marginal_l1=error,
-                           plan_cost_squared=plan_cost, projection_index=result.projection_index,
+                           plan_cost_squared=result.plan_cost_squared, projection_index=result.projection_index,
                            **median, **quality,
                            **{f"{key}_delta_vs_adsn": value-adsn_metrics[key]
                               for key, value in quality.items()})
@@ -265,7 +261,7 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
                     key = f"{phase}_ms"
                     row[f"{phase}_speedup_vs_mw2"] = rows["MW2"][key]/row[key] if "MW2" in rows else np.nan
                 print(f"{name} seed={seed} K={k:3} {m:15}  SW2={row['patch_sw2']:.5f}"
-                      f"  W2={row['patch_w2']:.5f}  plan={row['plan_ms']:.2f} ms"
+                      f"  W2={row['patch_w2']:.5f}  transport={row['plan_ms']:.2f} ms"
                       f"  total={row['total_ms']:.1f} ms", flush=True)
             records.extend(rows.values())
             summarize(root, records, timing_rows, adsn_rows)

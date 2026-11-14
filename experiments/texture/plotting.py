@@ -27,7 +27,7 @@ def save_curves(folder, summary, adsn_rows):
     fig, axes = plt.subplots(2, 3, figsize=(13, 7.5), layout="constrained")
     specs = (
         ("patch_sw2", "Patch SW2", 1), ("patch_w2", "Patch W2", 1),
-        ("autocov_rmse", "RGB autocovariance RMSE", 1), ("plan_ms", "Plan time (ms)", 1),
+        ("autocov_rmse", "RGB autocovariance RMSE", 1), ("plan_ms", "Transport time (ms)", 1),
         ("method_ms", "Plan + map + aggregation (ms)", 1), ("total_ms", "Total pipeline time (s)", 1000),
     )
     for ax, (key, label, factor) in zip(axes.flat, specs):

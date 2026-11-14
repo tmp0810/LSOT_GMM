@@ -81,10 +81,11 @@ algebraically the same as the direct sum in the StoRI helper.
 - **Time.** CPU float64, one thread by default. Record image loading,
   ADSN, patch preparation, shared EM, projection-bank generation,
   component-plan solve, map setup, application, and patch aggregation.
-  `plan_ms` includes projecting and lifting for LSOT and Gaussian costs
-  plus the LP for MW2. Bank generation is separate. Avg-LSOT can make
-  its plan without computing Gaussian pair costs, so its diagnostic
-  cost is evaluated outside the timer. Method phases use the median
+  `plan_ms` starts with the fitted GMMs and a ready projection bank.
+  It includes plan construction and its Gaussian cost for every method:
+  the cost matrix and LP for MW2, projecting and lifting plus scoring
+  the candidates for min-LSOT, and scoring the final averaged plan for
+  avg-LSOT. Bank generation is separate. Method phases use the median
   of three sequential runs after one untimed warmup per method;
   method order rotates. `total_ms` charges each method the full cost
   of shared preparation, fitting, and its own bank in addition to the
@@ -97,7 +98,8 @@ algebraically the same as the direct sum in the StoRI helper.
 Under `results/texture/` (or `--output-dir`):
 
 - `settings.json`, `metrics.csv` (one row per exemplar/seed/K/method),
-  `timings.csv` (per repeat), `summary.csv` (mean/std by K and method),
+  `timings.csv` (per repeat), `summary.csv` (mean/std by K and method;
+  `transport_time` is `plan_ms_mean`, in milliseconds),
   and `adsn_metrics.csv` (the untransported baseline). Delta columns
   are method minus ADSN. Speedups are ratios against MW2 on the same
   exemplar/seed/K.

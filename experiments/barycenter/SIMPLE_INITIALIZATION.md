@@ -83,10 +83,15 @@ python -m experiments.barycenter.simple_initialization_grid \
 The output root is `results/simple_initialization_grid_with_gaussian/`:
 
 - `metrics.csv`: one row per node and method, including bilinear weights,
-  measured solve phases, MW2 objective, and independent min-LSOT-B test loss.
-- `summary.csv`: average per fitted node, summed solver time for the entire
-  grid, and speedup relative to MW2. Copied corners do not enter the averages.
-  Standard deviation of total grid time requires multiple repeats.
+  measured solve phases, `transport_ms`, MW2 objective, and independent
+  min-LSOT-B test loss.
+- `summary.csv`: per-node statistics, whole-grid timings, and speedup
+  relative to MW2. `grid_total_ms_median` is the median full solver time
+  across repeats. `transport_time` is the median sum of `transport_ms`
+  over the fitted nodes of each repeat, in milliseconds per grid (per
+  solve for the Gaussian control). Copied corners are excluded. Use
+  `--repeats 3` or more for timing in the paper, and a new `--output-dir`
+  if the previous run predates transport timing.
 - `<case>/K<K>/repeat_00/<method>/barycenters.png` and `.pdf`: full 7×7 grid;
   the folder also saves the individual GMMs, initializations, and loss history.
 - `<case>/K<K>/comparison.png` and `.pdf`: center cell comparison at shared
@@ -98,6 +103,15 @@ The output root is `results/simple_initialization_grid_with_gaussian/`:
 
 Timing excludes data preparation, warmup, evaluation, and rendering. With
 multiple repeats, the displayed grids are from the last repeat.
+
+`transport_ms` is a breakdown of the solver time. For MW2 it covers tuple
+enumeration, Gaussian tuple costs, LP constraint setup, and the LP solve.
+For min-LSOT-B it covers cached input projections and all forward plan
+construction and scoring during training and checkpoint evaluation. It
+excludes initializer construction, direction sampling, backpropagation,
+parameter updates and final GMM construction, which remain in the full
+barycenter solve timer. Compare grid solver times for a speedup claim;
+the transport times describe where each solver spends its time.
 
 ## New initializer
 

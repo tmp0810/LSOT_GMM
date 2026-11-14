@@ -154,10 +154,22 @@ def solve_mixed(inputs, initial, cfg, weights=None):
     ])
     L = cfg['L']
     directions = bank(L, 0)
+    validation_bank = bank(512, 1000003)
     omega = [1/len(inputs)] * len(inputs) if weights is None else weights
+    # Cache projections of the fixed input GMMs once per bank. Count that
+    # forward transport work, but keep bank sampling in the solver total only.
+    tick = time.perf_counter()
     train = FastObjective(inputs, omega, directions, 'B', 'min')
-    validation = FastObjective(inputs, omega, bank(512, 1000003), 'B', 'min')
+    validation = FastObjective(inputs, omega, validation_bank, 'B', 'min')
+    transport_s = time.perf_counter() - tick
     best, state, selected, history = float('inf'), None, 0, []
+
+    def transport_objective(objective, gmm):
+        nonlocal transport_s
+        tick = time.perf_counter()
+        value = objective(gmm)
+        transport_s += time.perf_counter() - tick
+        return value
 
     def candidate():
         return TensorGMM(logits.softmax(0), means, covariance)
@@ -166,7 +178,7 @@ def solve_mixed(inputs, initial, cfg, weights=None):
         nonlocal best, state, selected
         with torch.no_grad():
             g = candidate()
-            value = float(validation(g))
+            value = float(transport_objective(validation, g))
             if not np.isfinite(value) or torch.linalg.eigvalsh(covariance).min() <= 0:
                 raise FloatingPointError('Invalid covariance or loss')
             if value < best:
@@ -181,11 +193,13 @@ def solve_mixed(inputs, initial, cfg, weights=None):
             keep = list(dict.fromkeys(winners + list(range(L))))[:L - L // 4]
             directions = join_banks(subset_bank(directions, torch.tensor(keep)),
                                    bank(L // 4, 10000019 + step))
+            tick = time.perf_counter()
             train.set_bank(directions)
+            transport_s += time.perf_counter() - tick
         optimizer.zero_grad(set_to_none=True)
         covariance = covariance.detach().requires_grad_(True)
         g = candidate()
-        loss = train(g)
+        loss = transport_objective(train, g)
         loss.backward()
         if not torch.isfinite(loss) or not torch.isfinite(covariance.grad).all():
             raise FloatingPointError(f'Nonfinite gradient/loss at step {step}')
@@ -197,6 +211,7 @@ def solve_mixed(inputs, initial, cfg, weights=None):
         if step % 10 == 0 or step == cfg['steps']:
             checkpoint(step)
     return GMM(*state), history, dict(
-        optimizer_ms=1000 * (time.perf_counter() - started), selected_step=selected,
+        optimizer_ms=1000 * (time.perf_counter() - started), transport_ms=1000 * transport_s,
+        selected_step=selected,
         validation_objective=best, status='max_steps', error='',
     )

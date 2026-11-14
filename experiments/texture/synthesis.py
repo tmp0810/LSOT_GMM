@@ -52,15 +52,14 @@ class Synthesis:
     plan: SparsePlan
     timings: dict
     projection_index: int | None
-    plan_cost_squared: float | None
+    plan_cost_squared: float
 
 
 @torch.inference_mode()
 def synthesize(source, target, source_patches, shape, patch_size, method, bank, batch_size):
-    """Time plan, affine-map setup, patch transformation and overlap-add."""
+    """Time plan construction and scoring, map setup, mapping and overlap-add."""
     start = perf_counter()
     direction = None
-    cost = None
     if method == "MW2":
         plan, cost = mw2_plan(source, target)
     else:
@@ -71,6 +70,7 @@ def synthesize(source, target, source_patches, shape, patch_size, method, bank, 
             cost = float(result.cost_squared)
         elif mode == "avg":
             plan = average_lsot(source, target, bank, kind)
+            cost = float(plan.cost(source, target))
         else:
             raise ValueError(f"Unknown method: {method}")
     planned = perf_counter()

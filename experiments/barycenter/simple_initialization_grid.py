@@ -97,11 +97,12 @@ def load_inputs(root, case, k, config):
 
 def fit_node(name, inputs, weights, initializers, optimization, mw2):
     if len(inputs) == 1:
-        return inputs[0], None, [], dict(status='anchor', total_ms=0.)
+        return inputs[0], None, [], dict(status='anchor', total_ms=0., transport_ms=0.)
     if name == 'MW2':
         solved, times = fit_mw2(inputs, mw2, weights)
-        times['mw2_finalize_ms'] = times['total_ms']-sum(
+        times['transport_ms'] = sum(
             times[k] for k in ('tuple_setup_ms', 'gaussian_cost_ms', 'constraint_setup_ms', 'lp_ms'))
+        times['mw2_finalize_ms'] = times['total_ms']-times['transport_ms']
         return solved.gmm, None, [], dict(
             status='ok', num_tuples=int(np.prod([g.count for g in inputs])),
             covariance_iterations=solved.covariance_iterations,
@@ -117,17 +118,20 @@ def write_tables(root, records):
     # Corners are copied, so leave them out of averages and speedup.
     active = frame[frame['active_inputs'] > 1]
     groups = ['case', 'K', 'name']
-    columns = ['total_ms', 'final_mw2', 'initial_mw2', 'test_min_B',
+    columns = ['total_ms', 'transport_ms', 'final_mw2', 'initial_mw2', 'test_min_B',
                'relative_mw2_gap', *(key for key, _ in PHASES)]
     columns = [key for key in columns if key in active]
     summary = active.groupby(groups, sort=False)[columns].agg(['mean', 'std'])
     summary.columns = ['_'.join(col) for col in summary.columns]
     summary = summary.reset_index()
-    # Summing first per repeat gives end-to-end solver time over all grid nodes.
-    per_repeat = active.groupby([*groups, 'repeat'])['total_ms'].sum()
-    grid = per_repeat.groupby(level=groups).agg(['mean', 'std', 'size']).rename(columns={
-        'mean': 'grid_total_ms_mean', 'std': 'grid_total_ms_std', 'size': 'repeats'})
+    # Sum the fitted nodes before comparing full grid repeats.
+    per_repeat = active.groupby([*groups, 'repeat'])[['total_ms', 'transport_ms']].sum()
+    grid_groups = per_repeat.groupby(level=groups)
+    grid = grid_groups.agg(['mean', 'median', 'std'])
+    grid.columns = [f'grid_{metric}_{stat}' for metric, stat in grid.columns]
+    grid['repeats'] = grid_groups.size()
     summary = summary.merge(grid.reset_index(), on=groups)
+    summary['transport_time'] = summary['grid_transport_ms_median']
     mw2_times = summary[summary['name']=='MW2'].set_index(['case', 'K'])['grid_total_ms_mean']
     summary['speedup_vs_mw2'] = [mw2_times.loc[c, k]/t for c,k,t in
                                   zip(summary['case'], summary['K'], summary['grid_total_ms_mean'])]
@@ -153,13 +157,15 @@ def run_grid(root, case, k, config, settings):
         optimization['steps'] = config['steps']
     options = {c['name']: c for c in configurations(settings['initialization'])}
     methods = config['methods']
-    manifest = dict(schema=1, case=case, K=k, seed=0, provenance=provenance,
+    manifest = dict(schema=2, case=case, K=k, seed=0, provenance=provenance,
                     size=size, repeats=config['repeats'], density_grid=config['density_grid'],
                     initializers={n: options[n] for n in methods if n != 'MW2'}, methods=methods,
                     optimization=optimization, mw2=config['mw2'], cpu_threads=1)
     key = fingerprint(manifest, SimpleNamespace(inputs=inputs))
     previous = read_record(root/'run_manifest.json')
     if previous and previous['fingerprint'] != key:
+        if previous.get('settings', {}).get('schema') == 1:
+            raise ValueError(f'Existing results in {root} lack transport timing; choose a new --output-dir')
         raise ValueError(f'Settings changed in {root}; choose a new --output-dir')
     write_json(root/'run_manifest.json', dict(fingerprint=key, settings=manifest))
     # Preserve the exact prepared cache; load_gmm renormalizes its weights.
