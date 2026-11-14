@@ -1,5 +1,5 @@
 {
-  "cases": ["gaussian", "synthetic", "images"],
+  "cases": ["synthetic", "images"],
   "component_counts": [10, 30, 50],
   "methods": ["MW2", "greedy_mean_spread0.25"],
   "grid_size": 7,
