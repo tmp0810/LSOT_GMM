@@ -203,7 +203,7 @@ def worker(spec_path):
     write_json(out/'result.json', result)
 
 
-def evaluate(candidate, inputs, weights, args, seed, reference=None):
+def evaluate(candidate, inputs, weights, args, seed, reference=None, *, bounds=(0., 1.)):
     from .plotting import density_grid
     row = dict(mw2_objective=mw2_objective(inputs, weights, candidate))
     for kind in args.test_kinds:
@@ -214,8 +214,8 @@ def evaluate(candidate, inputs, weights, args, seed, reference=None):
                sw2_to_reference=None, density_l1_to_reference=None)
     if reference is not None:
         ref_cost = mw2_objective(inputs, weights, reference)
-        _, a = density_grid(candidate, (0., 1.), 128)
-        _, b = density_grid(reference, (0., 1.), 128)
+        _, a = density_grid(candidate, bounds, 128)
+        _, b = density_grid(reference, bounds, 128)
         row.update(relative_mw2_gap=(row['mw2_objective']-ref_cost)/max(ref_cost, 1e-15),
                    mw2_to_reference=np.sqrt(max(0., mw2_distance_squared(reference, candidate))),
                    sw2_to_reference=empirical_sw2(reference, candidate, count=args.eval_samples,

@@ -79,8 +79,9 @@ synthetic. It writes per-phase timings, a runtime comparison, common-scale
 contours, and validation histories. See [SIMPLE_INITIALIZATION.md](SIMPLE_INITIALIZATION.md)
 for settings, output paths, and the initializer ablation.
 
-The main 7×7 grid compares MW2 and greedy min-LSOT-B at K=5, 10, and 30.
-Both cases use partial refresh, with L=64 for images and L=128 for synthetic:
+The main config compares MW2 and greedy min-LSOT-B on the three-Gaussian
+control and on 7×7 synthetic and image grids at K=10, 30, and 50.
+The two grids use partial refresh with L=100:
 
 ```bash
 python -m experiments.barycenter.simple_initialization_grid \

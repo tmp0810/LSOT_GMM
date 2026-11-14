@@ -43,7 +43,7 @@ python -m experiments.barycenter.simple_initialization_grid \
   --config experiments/barycenter/configs/simple_initialization_grid.json
 ```
 
-The grid config runs **synthetic and images**, at **K=5, 10, 30** components
+The grid config runs **synthetic and images**, at **K=10, 30, 50** components
 per input GMM and data seed 0. K=30 reuses the bundled input fits; K=5 and 10
 use the scaling experiment's synthetic refinement and image EM fitting. All
 methods share exactly the same four inputs at each K. No download is needed.
@@ -56,17 +56,22 @@ representative, and uses the original node weights at the final merge.
 Greedy min-LSOT-B and MW2 use the same node weights. The variational
 component budget is the sum of the active input counts minus the number
 of active inputs plus one. The main config uses partial direction refresh
-for both cases (25% replaced every 10 steps, retaining the winning directions).
-Images uses 64 training directions and 100 steps; synthetic uses 128 training
-directions and 200 steps. Both use the same covariance update as the center
+for both grid cases (25% replaced every 10 steps, retaining the winning directions).
+Both use 100 training directions; images uses 100 steps and synthetic uses
+200 steps when `steps` is null. Both use the same covariance update as the center
 experiment and choose a checkpoint on a fixed 512-direction validation bank.
 The per-case `optimization` entries override the inherited training bank
 size and sampling mode. These settings were selected from the K=30 center
 sweep, rather than an exhaustive grid search.
 
-The default is one repeat (588 method/node rows). The full run can take
-tens of minutes on one CPU thread: there are 50 four-input K=30 MW2 LPs
-across the two cases. Rerun the same command to resume from saved nodes.
+The `gaussian` case separately computes one equal-weight barycenter of the
+three original single-component Gaussians per method and repeat. It does
+not use the grid or K sweep. The greedy solver uses fixed sampling, L=100,
+and 100 steps. Its folder includes contour overlays with the input Gaussians.
+
+The default is one repeat (590 method/node rows). The full MW2 solve has
+6,250,000 tuples per K=50 interior node. Use `--component-counts 10 30`
+to start with smaller grids. Rerun the same command to resume from saved nodes.
 Use a separate output directory when changing settings. A quick check:
 
 ```bash
@@ -75,7 +80,7 @@ python -m experiments.barycenter.simple_initialization_grid \
   --output-dir results/simple_initialization_grid_smoke
 ```
 
-The output root is `results/simple_initialization_grid_greedy_partial/`:
+The output root is `results/simple_initialization_grid_with_gaussian/`:
 
 - `metrics.csv`: one row per node and method, including bilinear weights,
   measured solve phases, MW2 objective, and independent min-LSOT-B test loss.
@@ -87,6 +92,9 @@ The output root is `results/simple_initialization_grid_greedy_partial/`:
 - `<case>/K<K>/comparison.png` and `.pdf`: center cell comparison at shared
   contour levels. `runtime.png` and `runtime_breakdown.png` report whole-grid
   timings. `<case>/scaling_runtime.png` compares K values.
+- `gaussian/comparison.png` and `.pdf`: comparison of the single Gaussian
+  barycenters. `gaussian/repeat_00/<method>/gaussian_overlay.png` and `.pdf`
+  overlay the inputs and barycenter.
 
 Timing excludes data preparation, warmup, evaluation, and rendering. With
 multiple repeats, the displayed grids are from the last repeat.

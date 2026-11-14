@@ -129,6 +129,11 @@ def initialize(inputs, cfg, weights=None):
             a, b = map(singleton, inputs)
             return merge(a, b, weights), 1
         omega = np.ones(len(inputs)) if weights is None else np.asarray(weights, dtype=float)
+        if kind == 'greedy' and len(inputs) == 3 and all(g.count == 1 for g in inputs):
+            # The Gaussian control has only one feasible tuple. Use all
+            # three original Gaussians when computing its final moments.
+            a, b, c = map(singleton, inputs)
+            return merge(merge(a, b, omega[:2]), c, omega), 1
         candidates = []
         for order in [(0, 1, 2, 3), (0, 2, 1, 3), (0, 3, 1, 2)]:
             a, b, c, d = [singleton(inputs[i]) for i in order]
@@ -188,7 +193,7 @@ def write_summary(root, rows, summary_rows=None):
     return summary
 
 
-def save_case_plots(out, summary, models, *, grid_nodes=None):
+def save_case_plots(out, summary, models, *, grid_nodes=None, bounds=(0., 1.)):
     """Compare methods with common contour levels and separate timing scales."""
     preferred = ['MW2'] + [name for name in models if name != 'MW2']
     summary = summary.set_index('name').loc[[n for n in preferred if n in summary['name'].values]]
@@ -229,13 +234,13 @@ def save_case_plots(out, summary, models, *, grid_nodes=None):
     # Individual comparisons remain available when running the full ablation.
     if len(models) > 5:
         return
-    grids = [density_grid(models[n][0], (0., 1.), 160) for n in preferred]
+    grids = [density_grid(models[n][0], bounds, 160) for n in preferred]
     levels = np.linspace(0, max(z.max() for _, z in grids), 10)[1:]
     fig, axes = plt.subplots(1, len(grids), figsize=(3*len(grids), 3.3),
                              squeeze=False, layout='constrained')
     for ax, name, (x, z) in zip(axes[0], preferred, grids):
         ax.contour(x, x, z, levels=levels, cmap='viridis')
-        ax.set(xlim=(0, 1), ylim=(0, 1), aspect='equal', xticks=[], yticks=[],
+        ax.set(xlim=bounds, ylim=bounds, aspect='equal', xticks=[], yticks=[],
                title=f'{labels.get(name, name)}\nMW2 objective: {models[name][1]:.6f}')
     for suffix in ('png', 'pdf'):
         fig.savefig(out/f'comparison.{suffix}', dpi=170)
