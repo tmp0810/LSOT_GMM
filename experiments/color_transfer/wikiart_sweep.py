@@ -45,7 +45,8 @@ def summarize_sweep(rows):
                 values = [value for value in values if value is not None]
                 entry[metric + "_std"] = stdev(values) if len(values) > 1 else None
             pairs.append(entry)
-        methods.extend({**entry, "K": k} for entry in method_summary)
+        methods.extend({**entry, "K": k, "transport_time": entry["mean_transport_ms_median"]}
+                       for entry in method_summary)
     return pairs, methods
 
 

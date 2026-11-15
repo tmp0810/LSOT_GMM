@@ -172,3 +172,19 @@ def solve_mw2(source, target):
     matrix = torch.as_tensor(np.real_if_close(matrix), dtype=source.weights.dtype,
                              device=source.weights.device)
     return SparsePlan.from_dense(matrix), float(np.real_if_close(squared_cost))
+
+
+def solve_mw2_batched(source, target):
+    """Exact component OT using the same Gaussian cost kernel as LSOT."""
+    import ot
+
+    device = source.weights.device
+    rows = torch.arange(source.count, device=device).repeat_interleave(target.count)
+    cols = torch.arange(target.count, device=device).repeat(source.count)
+    cost = gaussian_pair_costs(source, target, rows, cols).reshape(source.count, target.count)
+    coupling, info = ot.emd(source.weights.detach().cpu().numpy(), target.weights.detach().cpu().numpy(),
+                            cost.detach().cpu().numpy(), numThreads=1, log=True)
+    if info["warning"] is not None:
+        raise RuntimeError(f"MW2 LP did not solve successfully: {info['warning']}")
+    plan = SparsePlan.from_dense(torch.as_tensor(coupling, device=device, dtype=source.weights.dtype))
+    return plan, float(info["cost"])

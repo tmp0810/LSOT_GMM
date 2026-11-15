@@ -65,7 +65,7 @@ def summarize_pairs(rows):
         groups.setdefault(group_key, []).append(paired)
 
     pair_summary = []
-    measures = ("cost_squared", "relative_cost_gap", "transport_ms_mean",
+    measures = ("cost_squared", "relative_cost_gap", "transport_ms_mean", "transport_ms_median",
                 "identity_color_sw2", "identity_color_w2", *METRICS,
                 *(f"delta_{name}_to_mw2" for name in METRICS),
                 "delta_color_w2_to_identity")

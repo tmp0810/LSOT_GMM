@@ -18,6 +18,7 @@ from threadpoolctl import threadpool_limits
 
 from lsot import (GMM, BarycentricMap, average_lsot, minimum_lsot, topk_lsot,
                   optimized_minimum_lsot, solve_mw2)
+from lsot.plans import solve_mw2_batched
 from lsot.projections import PROJECTION_KINDS, sample_projection_bank
 from .data import download_reference_images, fit_gmm, guided_output, read_rgb, save_rgb
 from .evaluation import ColorEvaluator, benchmark, save_comparison, synchronize, time_summary
@@ -43,6 +44,8 @@ class Config:
     projection_seed: int | list[int] = 20260909
     device: str = "auto"
     dtype: str = "float64"
+    mw2_backend: str = "original"
+    verify_mw2: bool = False
     max_side: int | None = None
     fit_pixels: int | None = None
     em_max_iter: int = 100
@@ -93,6 +96,10 @@ class Config:
             raise ValueError("seeds must be nonempty and distinct")
         if self.dtype not in {"float32", "float64"}:
             raise ValueError("dtype must be float32 or float64")
+        if self.mw2_backend not in {"original", "batched"}:
+            raise ValueError("mw2_backend must be original or batched")
+        if self.verify_mw2 and self.mw2_backend != "batched":
+            raise ValueError("verify_mw2 requires the batched backend")
         if min(self.components_source, self.components_target, self.repeats,
                self.map_repeats, self.batch_size, self.threads, self.em_max_iter) < 1:
             raise ValueError("component counts, repetitions and batch/thread sizes must be positive")
@@ -164,7 +171,7 @@ def _summarize(rows):
     for row in rows:
         groups.setdefault((row["K0"], row["K1"], row["method"], row["L"]), []).append(row)
     summary = []
-    metrics = ["transport_ms_mean", "map_setup_ms_mean", "map_apply_ms_mean", "pipeline_ms",
+    metrics = ["transport_ms_mean", "transport_ms_median", "map_setup_ms_mean", "map_apply_ms_mean", "pipeline_ms",
                "cost_squared", "relative_cost_gap", "plan_rmse", "color_sw2", "guided_color_sw2",
                "color_w2", "guided_color_w2", "identity_color_sw2", "identity_color_w2"]
     for (_, _, method, count), group in groups.items():
@@ -240,7 +247,10 @@ def run_experiment(config):
                   "Banks are sampled before timing and bank sampling is reported separately. "
                   "Pipeline excludes file I/O, plotting and evaluation; includes GMM fitting, "
                   "input transfers, transport, map setup/application and optional guided filtering.",
-        "mw2_backend": "Original gmmot.GW2: SciPy and POT CPU; transfers included.",
+        "mw2_backend": ("Shared batched Gaussian cost (PyTorch) + POT CPU; transfers included."
+                        if config.mw2_backend == "batched" else
+                        "Original gmmot.GW2: SciPy and POT CPU; transfers included."),
+        "mw2_verification": "Original solver checked outside transport timing" if config.verify_mw2 else None,
         "plan_reference": "MW2 component LP, not full distribution-space W2",
         "minimum_selection": "One lift for the entire GMM pair, minimizing true Gaussian W2-squared "
                              "cost over the shared finite bank. Zero-based index; first index on exact ties.",
@@ -302,6 +312,7 @@ def run_experiment(config):
                 for count in sorted(set(config.projection_counts))
                 for aggregation in config.aggregations for kind in config.projection_kinds]
             for kind, count, aggregation, projection_seed in jobs:
+                original_cost_error = original_plan_l1 = None
                 prefix = {"avg": "", "min": "min-", "min-opt": "min-opt-",
                           "top2": "top2-", "top3": "top3-", "top4": "top4-"}
                 method = "MW2" if kind == "MW2" else f"{prefix[aggregation]}LSOT-{kind}"
@@ -318,8 +329,9 @@ def run_experiment(config):
                             config, seed, device, dtype, method_folder, projection_seed=projection_seed)
                         active_projection_seed = projection_seed
                 if kind == "MW2":
+                    mw2_solver = solve_mw2_batched if config.mw2_backend == "batched" else solve_mw2
                     def solver():
-                        plan, cost = solve_mw2(source, target)
+                        plan, cost = mw2_solver(source, target)
                         return plan, cost, None
                 else:
                     selected_bank = banks[kind].prefix(count)
@@ -350,6 +362,13 @@ def run_experiment(config):
                     raise RuntimeError(f"Invalid {name} result: marginal error={marginal_error}, cost={cost}")
                 if kind == "MW2":
                     reference_plan, reference_cost = plan, cost
+                    if config.verify_mw2:
+                        original_plan, original_cost = solve_mw2(source, target)
+                        original_cost_error = abs(cost - original_cost)
+                        original_plan_l1 = float((plan.dense() - original_plan.dense()).abs().sum())
+                        if original_plan.marginal_error(source, target) > feasibility_tol or not np.isclose(
+                                cost, original_cost, rtol=1e-6, atol=feasibility_tol):
+                            raise RuntimeError(f"Batched and original MW2 costs differ: {cost} vs {original_cost}")
                 if cost < reference_cost - 1e-7 * max(1.0, abs(reference_cost)):
                     raise RuntimeError("Lifted cost is below the MW2 optimum beyond numerical tolerance")
                 mapper, setup_times = benchmark(lambda: BarycentricMap.from_plan(source, target, plan),
@@ -391,6 +410,7 @@ def run_experiment(config):
                         **{f"best_{key}": _numpy(value) for key, value in vars(selection.best_bank).items()})
                 outputs.append((display_name, mapped))
                 transport_mean, transport_std = time_summary(transport_times)
+                transport_median = float(np.median(transport_times))
                 setup_mean, setup_std = time_summary(setup_times)
                 apply_mean, apply_std = time_summary(apply_times)
                 row = {
@@ -406,18 +426,22 @@ def run_experiment(config):
                                              if aggregation is not None and aggregation.startswith("top") else None),
                     "initial_projection": (selection.initial_projection_index if aggregation == "min-opt" else None),
                     "best_iteration": selection.best_iteration if aggregation == "min-opt" else None,
-                    "solver_backend": "scipy+POT(cpu)" if kind == "MW2" else "torch",
+                    "solver_backend": (("torch+POT(cpu)" if config.mw2_backend == "batched" else "scipy+POT(cpu)")
+                                       if kind == "MW2" else "torch"),
                     "source_pixels": len(x), "target_pixels": len(y),
                     "fit_source_pixels": count_x, "fit_target_pixels": count_y,
                     "em_source_converged": bool(sx.converged_), "em_target_converged": bool(sy.converged_),
                     "fit_ms": fit_x + fit_y, "input_setup_ms": input_ms,
                     "bank_sampling_ms": bank_times[kind] if kind != "MW2" else 0.0,
                     "transport_ms_mean": transport_mean, "transport_ms_std": transport_std,
+                    "transport_ms_median": transport_median,
                     "map_setup_ms_mean": setup_mean, "map_setup_ms_std": setup_std,
                     "map_apply_ms_mean": apply_mean, "map_apply_ms_std": apply_std,
                     "guided_filter_ms": post_ms,
                     "pipeline_ms": fit_x + fit_y + input_ms + transport_mean + setup_mean + apply_mean + post_ms,
                     "cost_squared": cost, "mw2_cost_squared": reference_cost,
+                    "mw2_original_cost_abs_error": original_cost_error,
+                    "mw2_original_plan_l1_error": original_plan_l1,
                     "relative_cost_gap": (cost - reference_cost) / reference_cost if reference_cost > 1e-15 else None,
                     "plan_rmse": _plan_rmse(plan, reference_plan), "nnz": plan.nnz,
                     "marginal_l1_error": marginal_error,

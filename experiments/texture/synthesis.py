@@ -4,13 +4,12 @@ from time import perf_counter
 import warnings
 
 import numpy as np
-import ot
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.mixture import GaussianMixture
 import torch
 
 from lsot import BarycentricMap, GMM, SparsePlan, average_lsot, minimum_lsot
-from lsot.gaussians import gaussian_pair_costs
+from lsot.plans import solve_mw2_batched as mw2_plan
 from lsot.projections import PROJECTION_KINDS
 from .data import aggregate_patches
 
@@ -31,19 +30,6 @@ def fit_gmm(patches, components, seed, *, iterations, tolerance, regularization)
     return model, dict(converged=bool(fit.converged_), iterations=int(fit.n_iter_),
                        lower_bound=float(fit.lower_bound_), samples=len(patches),
                        warnings=[str(item.message) for item in caught])
-
-
-def mw2_plan(source, target):
-    """Exact component LP, using the same Gaussian cost kernel as min-LSOT."""
-    rows = torch.arange(source.count).repeat_interleave(target.count)
-    cols = torch.arange(target.count).repeat(source.count)
-    cost = gaussian_pair_costs(source, target, rows, cols).reshape(source.count, target.count)
-    coupling, info = ot.emd(source.weights.numpy(), target.weights.numpy(), cost.numpy(),
-                            numThreads=1, log=True)
-    if info["warning"] is not None:
-        raise RuntimeError(f"MW2 LP did not solve successfully: {info['warning']}")
-    plan = SparsePlan.from_dense(torch.from_numpy(coupling))
-    return plan, float(info["cost"])
 
 
 @dataclass

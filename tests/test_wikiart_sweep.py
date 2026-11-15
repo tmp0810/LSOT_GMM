@@ -110,7 +110,8 @@ def test_offline_nine_methods_sweep_fixed_banks_and_resume(tmp_path, monkeypatch
     config = Config(download_reference=False, aggregations=["avg", "min"],
                     projection_counts=[2], device="cpu", seeds=[0], repeats=1, warmups=0,
                     map_repeats=1, guided_filter=False, eval_samples=32,
-                    eval_projections=3, eval_w2_samples=16)
+                    eval_projections=3, eval_w2_samples=16,
+                    mw2_backend="batched", verify_mw2=True)
     fits = Mock(wraps=run.fit_gmm)
     monkeypatch.setattr(run, "fit_gmm", fits)
     folder = tmp_path / "out"
@@ -119,6 +120,11 @@ def test_offline_nine_methods_sweep_fixed_banks_and_resume(tmp_path, monkeypatch
     assert len(rows) == 36 and fits.call_count == 8  # 2 K x 2 pairs x 2 images
     assert len({row["method"] for row in rows}) == 9
     assert not any("min-opt" in row["method"] for row in rows)
+    for row in rows:
+        if row["method"] == "MW2":
+            assert row["solver_backend"] == "torch+POT(cpu)"
+            assert row["mw2_original_cost_abs_error"] < 1e-10
+            assert row["mw2_original_plan_l1_error"] < 1e-8
     # Cached CSV values are strings. Aggregation must accept resumed/mixed runs.
     resumed = run_wikiart_sweep(config, folder, image_dir, **kwargs)
     assert len(resumed) == 36 and fits.call_count == 8
@@ -126,6 +132,11 @@ def test_offline_nine_methods_sweep_fixed_banks_and_resume(tmp_path, monkeypatch
         summary = list(csv.DictReader(stream))
     assert len(summary) == 36
     assert {row["K"] for row in summary} == {"2", "3"}
+    assert all(float(row["transport_ms_median"]) > 0 for row in summary)
+    with (folder / "method_k_summary.csv").open() as stream:
+        method_summary = list(csv.DictReader(stream))
+    assert all(float(row["transport_time"]) > 0 and
+               row["transport_time"] == row["mean_transport_ms_median"] for row in method_summary)
     assert json.loads((folder / "sweep_config.json").read_text())["completed_component_counts"] == [2, 3]
     for pair in chosen:
         for name in ["evaluation_bank.npz", "projection_bank.npz", "projection_bank_B.npz", "projection_bank_B1D.npz"]:

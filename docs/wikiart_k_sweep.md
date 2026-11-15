@@ -15,6 +15,34 @@ up to 10,000 fit pixels, full covariance, GMM seed 0, projection seed
 The latter is independent of the solver's L=100. Exact empirical color W2
 is also retained (256 evaluation pixels); the primary plots use color SW2.
 
+## Shared kernel timing for the paper
+
+Use `wikiart_shared_kernel.json` to measure MW2 and LSOT with the same
+batched Gaussian cost kernel as texture synthesis. MW2 still solves the
+same exact discrete OT problem with POT. The original SciPy implementation
+runs once per fit as a numerical check outside the timer. The cost and
+coupling differences are recorded in `metrics.csv`. Set `verify_mw2` to
+`false` in the preset if you only need the benchmark and want to skip that
+extra solve.
+
+Each method gets one warm-up and three timed trials on CPU, in float64
+with one thread. In `method_k_summary.csv`, `transport_time` (milliseconds)
+equals `mean_transport_ms_median`: take the median over repeats and then
+average the pairs equally. The timer includes plan construction and
+Gaussian cost evaluation. Image preparation, GMM fitting, bank sampling,
+map construction/application and image quality metrics are outside it.
+The paper preset reports raw image metrics and uses a new output directory.
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+python -m experiments.color_transfer.wikiart_sweep \
+  --config experiments/color_transfer/configs/wikiart_shared_kernel.json \
+  --pair-indices 2 5 8 13 14 16 --component-counts 5 10 20 50 100 500 \
+  --aggregations min --device cpu --output-dir results/color_transfer/wikiart_shared_kernel
+```
+
+The original configs still select the original MW2 backend.
+
 ## Colab cells
 
 Update the existing checkout; no deletion of old experiment results is needed:
