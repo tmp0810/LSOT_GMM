@@ -43,23 +43,29 @@ python -m experiments.barycenter.simple_initialization_grid \
   --config experiments/barycenter/configs/simple_initialization_grid.json
 ```
 
-The grid config runs **synthetic and images**, at **K=10, 30, 50** components
-per input GMM and data seed 0. K=30 reuses the bundled input fits; K=5 and 10
-use the scaling experiment's synthetic refinement and image EM fitting. All
-methods share exactly the same four inputs at each K. No download is needed.
+The grid config runs **synthetic and images**, at **K=10, 30, 50, 100**
+components per input GMM and data seed 0. K=30 reuses the bundled input
+fits; other counts use the scaling experiment's synthetic refinement or
+image EM fitting. No download is needed. The five default methods are
+MW2 and min-LSOT-Mix, min-LSOT-SMix, min-LSOT-B, and min-LSOT-B1D.
+Use `--methods MW2 min-LSOT-B` to run a subset.
 
 Columns vary x, rows vary y; the node weights are
 `[(1-x)(1-y), x(1-y), (1-x)y, xy]`. Corner nodes copy the corresponding
 input, edges fit two inputs, and interior nodes fit four. The weighted
 initializer normalizes weights within each group for its Gaussian
 representative, and uses the original node weights at the final merge.
-Greedy min-LSOT-B and MW2 use the same node weights. The variational
-component budget is the sum of the active input counts minus the number
-of active inputs plus one. The main config uses partial direction refresh
+All methods use the same inputs and node weights. The four min-LSOT
+methods start from the same deterministic greedy GMM and each charges
+initialization to its solve time. The variational component budget is
+the sum of the active input counts minus the number of active inputs
+plus one. The main config uses partial direction refresh
 for both grid cases (25% replaced every 10 steps, retaining the winning directions).
 Both use 100 training directions; images uses 100 steps and synthetic uses
 200 steps when `steps` is null. Both use the same covariance update as the center
-experiment and choose a checkpoint on a fixed 512-direction validation bank.
+experiment. Each variant chooses a checkpoint on a fixed 512-direction
+validation bank of its own projection family. `final_mw2_mean` is the
+common MW2 objective for comparing quality across the variants.
 The per-case `optimization` entries override the inherited training bank
 size and sampling mode. These settings were selected from the K=30 center
 sweep, rather than an exhaustive grid search.
@@ -69,18 +75,19 @@ three original single-component Gaussians per method and repeat. It does
 not use the grid or K sweep. The greedy solver uses fixed sampling, L=100,
 and 100 steps. Its folder includes contour overlays with the input Gaussians.
 
-The default is one repeat (590 method/node rows). The full MW2 solve has
-6,250,000 tuples per K=50 interior node. Use `--component-counts 10 30`
-to start with smaller grids. Rerun the same command to resume from saved nodes.
+The default is one repeat. The full MW2 solve has 6,250,000 tuples per
+K=50 interior node and 100,000,000 at K=100. Start with
+`--component-counts 10 30`; the larger counts can require substantial RAM.
+Rerun the same command to resume from saved nodes.
 Use a separate output directory when changing settings. A quick check:
 
 ```bash
 python -m experiments.barycenter.simple_initialization_grid \
-  --cases synthetic --component-counts 5 --steps 1 \
+  --cases synthetic --component-counts 5 --grid-size 3 --steps 1 \
   --output-dir results/simple_initialization_grid_smoke
 ```
 
-The output root is `results/simple_initialization_grid_with_gaussian/`:
+The output root is `results/barycenter_min_lsmt_grid/`:
 
 - `metrics.csv`: one row per node and method, including bilinear weights,
   measured solve phases, `transport_ms`, MW2 objective, and independent
@@ -106,7 +113,7 @@ multiple repeats, the displayed grids are from the last repeat.
 
 `transport_ms` is a breakdown of the solver time. For MW2 it covers tuple
 enumeration, Gaussian tuple costs, LP constraint setup, and the LP solve.
-For min-LSOT-B it covers cached input projections and all forward plan
+For min-LSOT it covers cached input projections and all forward plan
 construction and scoring during training and checkpoint evaluation. It
 excludes initializer construction, direction sampling, backpropagation,
 parameter updates and final GMM construction, which remain in the full

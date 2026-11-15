@@ -1,7 +1,7 @@
 {
   "cases": ["synthetic", "images"],
   "component_counts": [10, 30, 50, 100],
-  "methods": ["MW2", "greedy_mean_spread0.25"],
+  "methods": ["MW2", "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"],
   "grid_size": 7,
   "density_grid": 100,
   "repeats": 1,
@@ -14,6 +14,6 @@
   "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
   "data": {"synthetic_spread": 0.5, "em_steps": 300, "em_tolerance": 0.001},
   "plots": true,
-  "output_dir": "results/simple_initialization_grid_with_gaussian"
+  "output_dir": "results/barycenter_min_lsmt_grid"
 }
 

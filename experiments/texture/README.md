@@ -1,7 +1,8 @@
 # Texture synthesis with GMM transport
 
-Compare MW2 and the eight min/avg LSOT variants on the same one-scale
-texture synthesis pipeline. Each method gets the same two fitted patch
+The default presets compare MW2 with the four min-LSOT variants (Mix,
+SMix, B, and B1D) on the same one-scale texture pipeline. Avg-LSOT remains
+available via `--methods`. Each method gets the same two fitted patch
 GMMs and changes only the component coupling used to build the
 conditional-mean map. The code keeps the original patch locations and
 averages overlapping patches to reconstruct an RGB image.
@@ -95,7 +96,7 @@ algebraically the same as the direct sum in the StoRI helper.
 
 ## Outputs
 
-Under `results/texture/` (or `--output-dir`):
+Under `results/texture_min_lsmt/` (or `--output-dir`):
 
 - `settings.json`, `metrics.csv` (one row per exemplar/seed/K/method),
   `timings.csv` (per repeat), `summary.csv` (mean/std by K and method;

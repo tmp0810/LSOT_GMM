@@ -247,12 +247,12 @@ def save_case_plots(out, summary, models, *, grid_nodes=None, bounds=(0., 1.)):
     plt.close(fig)
 
 
-def fit_initialized(inputs, cfg, optimization, weights=None):
+def fit_initialized(inputs, cfg, optimization, weights=None, *, kind='B'):
     tick = time.perf_counter()
     candidate, count = initialize(inputs, cfg, weights)
     initial = pad(candidate.gmm, sum(g.count for g in inputs)-len(inputs)+1, 0)
     init_ms = (time.perf_counter()-tick)*1000
-    result, history, stats = solve_mixed(inputs, initial, optimization, weights)
+    result, history, stats = solve_mixed(inputs, initial, optimization, weights, kind=kind)
     return initial, result, history, dict(candidates=count, init_ms=init_ms,
                                          total_ms=(time.perf_counter()-tick)*1000, **stats)
 

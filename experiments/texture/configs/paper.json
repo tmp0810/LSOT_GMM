@@ -1,13 +1,12 @@
 {
   "images": ["ground1013_small.png", "Fabric-02.png", "Rdesign5.png"],
   "image_dir": "data/texture/stori",
-  "output_dir": "results/texture",
+  "output_dir": "results/texture_min_lsmt",
   "component_counts": [10, 30, 50],
   "seeds": [0],
   "methods": [
     "MW2",
-    "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D",
-    "avg-LSOT-Mix", "avg-LSOT-SMix", "avg-LSOT-B", "avg-LSOT-B1D"
+    "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"
   ],
   "L": 100,
   "patch_size": 3,

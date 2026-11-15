@@ -42,7 +42,7 @@ def test_texture_cli_shares_mixtures_and_saves_feasible_plans(tmp_path):
     Image.fromarray(pixels).save(img)
     config = tmp_path/"test.json"
     output = tmp_path/"out"
-    config.write_text(json.dumps(dict(images=[str(img)], component_counts=[2, 3],
+    config.write_text(json.dumps(dict(images=[str(img)], component_counts=[2, 3], methods=list(METHODS),
         output_dir=str(output), L=4, max_side=22, fit_patches=180, em_iterations=30,
         sw_samples=64, w_samples=32, eval_directions=12, batch_size=53,
         timing_repeats=2, download=False, plots=False)))

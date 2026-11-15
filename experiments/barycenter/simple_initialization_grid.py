@@ -1,4 +1,4 @@
-"""Bilinear barycenter grids with full MW2 and greedy min-LSOT-B."""
+"""Bilinear barycenter grids with full MW2 and the four greedy min-LSOT variants."""
 import argparse
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ import torch
 from threadpoolctl import threadpool_limits
 
 from lsot.gaussians import GMM
+from lsot.projections import PROJECTION_KINDS
 from .data import gaussian_example, grid_nodes, load_gmm, save_gmm
 from .mixed_fast import PACKAGE, fit_mw2
 from .mixed_fast_solver import solve_mixed
@@ -20,14 +21,21 @@ from .simple_initialization import PHASES, configurations, fit_initialized, save
 
 
 DEFAULT = PACKAGE/'configs/simple_initialization_grid.json'
-METHODS = ('MW2', 'mixed_fast', 'greedy_mean_spread0.25')
+MIN_PROJECTIONS = {f'min-LSOT-{kind}': kind for kind in PROJECTION_KINDS}
+GREEDY = 'greedy_mean_spread0.25'
+METHODS = ('MW2', *MIN_PROJECTIONS, 'mixed_fast', GREEDY)
 CASES = ('gaussian', 'synthetic', 'images')
+
+
+def initializer_name(method):
+    return GREEDY if method in MIN_PROJECTIONS else method
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=DEFAULT)
     parser.add_argument('--cases', nargs='+', choices=CASES)
+    parser.add_argument('--methods', nargs='+', choices=METHODS)
     parser.add_argument('--component-counts', nargs='+', type=int)
     parser.add_argument('--grid-size', type=int)
     parser.add_argument('--repeats', type=int)
@@ -40,7 +48,7 @@ def parse_args(argv=None):
     if loaded.keys()-defaults.keys():
         parser.error('Unknown configuration keys')
     config = defaults | loaded
-    for key in ('cases', 'component_counts', 'grid_size', 'repeats', 'steps', 'output_dir', 'plots'):
+    for key in ('cases', 'methods', 'component_counts', 'grid_size', 'repeats', 'steps', 'output_dir', 'plots'):
         value = getattr(args, key)
         if value is not None:
             config[key] = str(value) if isinstance(value, Path) else value
@@ -51,7 +59,7 @@ def parse_args(argv=None):
     if set(config['cases'])-set(CASES) or set(config['methods'])-set(METHODS):
         parser.error('Unknown case or method')
     if 'gaussian' in config['cases'] and 'mixed_fast' in config['methods']:
-        parser.error('The Gaussian control supports MW2 and greedy_mean_spread0.25')
+        parser.error('The Gaussian control requires a greedy initializer, not mixed_fast')
     if 'MW2' not in config['methods']:
         parser.error('Include MW2 to evaluate and compare the grids')
     if any(type(k) is not int or k < 4 for k in config['component_counts']):
@@ -108,7 +116,8 @@ def fit_node(name, inputs, weights, initializers, optimization, mw2):
             covariance_iterations=solved.covariance_iterations,
             covariance_tolerance_met=solved.covariance_tolerance_met,
             marginal_error=solved.marginal_error, **times)
-    initial, result, history, stats = fit_initialized(inputs, initializers[name], optimization, weights)
+    initial, result, history, stats = fit_initialized(
+        inputs, initializers[initializer_name(name)], optimization, weights, kind=MIN_PROJECTIONS.get(name, 'B'))
     return result, initial, history, stats
 
 
@@ -159,7 +168,7 @@ def run_grid(root, case, k, config, settings):
     methods = config['methods']
     manifest = dict(schema=2, case=case, K=k, seed=0, provenance=provenance,
                     size=size, repeats=config['repeats'], density_grid=config['density_grid'],
-                    initializers={n: options[n] for n in methods if n != 'MW2'}, methods=methods,
+                    initializers={n: options[initializer_name(n)] for n in methods if n != 'MW2'}, methods=methods,
                     optimization=optimization, mw2=config['mw2'], cpu_threads=1)
     key = fingerprint(manifest, SimpleNamespace(inputs=inputs))
     previous = read_record(root/'run_manifest.json')
@@ -194,6 +203,7 @@ def run_grid(root, case, k, config, settings):
             if fitted:
                 ref = fitted['MW2'][0] if 'MW2' in fitted else load_gmm(
                     rep/'MW2'/'barycenters'/f'{tag}.npz')
+                initial_metrics = {}
                 for name, (result, initial, history, stats) in fitted.items():
                     folder = rep/name
                     for sub in ('barycenters', 'records', 'initializations', 'history'):
@@ -207,7 +217,10 @@ def run_grid(root, case, k, config, settings):
                     save_gmm(folder/'barycenters'/f'{tag}.npz', result, x=x, density=z, input_weights=weights)
                     if initial is not None:
                         save_gmm(folder/'initializations'/f'{tag}.npz', initial, input_weights=weights)
-                        start = evaluate(initial, gs, omega, evaluation, 0)
+                        init_key = initializer_name(name)
+                        if init_key not in initial_metrics:
+                            initial_metrics[init_key] = evaluate(initial, gs, omega, evaluation, 0)
+                        start = initial_metrics[init_key]
                         record.update(initial_mw2=start['mw2_objective'],
                                       initial_test_min_B=start['test_min_B'],
                                       initial_validation=history[0]['validation'])
@@ -261,8 +274,10 @@ def main(argv=None):
     rows = []
     with threadpool_limits(1):
         fit_mw2([tiny]*2, dict(gaussian_iterations=2, gaussian_tolerance=0.), [.5, .5])
-        if set(config['methods']) != {'MW2'}:
-            solve_mixed([tiny]*2, tiny, dict(L=4, steps=1, sampling='fixed', rate=1., mean=1e-6, mass=.01))
+        warmup_kinds = dict.fromkeys(MIN_PROJECTIONS.get(name, 'B') for name in config['methods'] if name != 'MW2')
+        for kind in warmup_kinds:
+            solve_mixed([tiny]*2, tiny, dict(L=4, steps=1, sampling='fixed', rate=1., mean=1e-6, mass=.01),
+                        kind=kind)
         for case in config['cases']:
             for k in (1,) if case == 'gaussian' else config['component_counts']:
                 folder = root/case if case == 'gaussian' else root/case/f'K{k}'

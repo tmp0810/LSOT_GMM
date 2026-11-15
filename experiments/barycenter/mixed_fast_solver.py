@@ -1,4 +1,4 @@
-"""Lifted tree initialization and mixed Adam / affine-invariant min-LSOT-B."""
+"""Lifted tree initialization and mixed Adam / affine-invariant min-LSOT."""
 
 from dataclasses import dataclass
 import itertools
@@ -15,8 +15,8 @@ from .fast_solver import FastObjective, join_banks, plan_entries, subset_bank
 from .reference import gaussian_barycenters
 
 
-def bank(L, seed):
-    return sample_projection_bank(2, L, kind='B', seed=seed)
+def bank(L, seed, kind='B'):
+    return sample_projection_bank(2, L, kind=kind, seed=seed)
 
 
 @dataclass
@@ -142,8 +142,8 @@ def covariance_step(covariance, gradient, rate):
     return (result + result.transpose(-1, -2)) / 2
 
 
-def solve_mixed(inputs, initial, cfg, weights=None):
-    """Fit min-LSOT-B, selecting the iterate on an independent fixed bank."""
+def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
+    """Fit min-LSOT, selecting the iterate on an independent same-family bank."""
     started = time.perf_counter()
     means = torch.nn.Parameter(initial.means.clone())
     logits = torch.nn.Parameter(initial.weights.log().clone())
@@ -153,14 +153,14 @@ def solve_mixed(inputs, initial, cfg, weights=None):
         dict(params=[means], lr=cfg['mean']),
     ])
     L = cfg['L']
-    directions = bank(L, 0)
-    validation_bank = bank(512, 1000003)
+    directions = bank(L, 0, kind)
+    validation_bank = bank(512, 1000003, kind)
     omega = [1/len(inputs)] * len(inputs) if weights is None else weights
     # Cache projections of the fixed input GMMs once per bank. Count that
     # forward transport work, but keep bank sampling in the solver total only.
     tick = time.perf_counter()
-    train = FastObjective(inputs, omega, directions, 'B', 'min')
-    validation = FastObjective(inputs, omega, validation_bank, 'B', 'min')
+    train = FastObjective(inputs, omega, directions, kind, 'min')
+    validation = FastObjective(inputs, omega, validation_bank, kind, 'min')
     transport_s = time.perf_counter() - tick
     best, state, selected, history = float('inf'), None, 0, []
 
@@ -192,7 +192,7 @@ def solve_mixed(inputs, initial, cfg, weights=None):
             winners = torch.cat(train.last_winners).unique().tolist()
             keep = list(dict.fromkeys(winners + list(range(L))))[:L - L // 4]
             directions = join_banks(subset_bank(directions, torch.tensor(keep)),
-                                   bank(L // 4, 10000019 + step))
+                                   bank(L // 4, 10000019 + step, kind))
             tick = time.perf_counter()
             train.set_bank(directions)
             transport_s += time.perf_counter() - tick
