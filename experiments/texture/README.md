@@ -35,6 +35,13 @@ only the selected images from a pinned revision of
 SHA-256 hashes. Cached files go into `data/texture/stori/`. Pass an explicit
 local path and `--no-download` for an offline run.
 
+Use `--device cuda` to run Gaussian costs and lifted plans, maps, and patch
+aggregation on a GPU. EM, ADSN, metrics and the exact POT LP remain on CPU.
+CUDA timing synchronizes at phase boundaries and includes the CPU transfers
+needed by POT. Use a new output directory for GPU timing. `--device cuda:1`
+chooses the second visible device; `CUDA_VISIBLE_DEVICES=1 ... --device cuda`
+is equivalent when running a separate process on the second GPU.
+
 ```bash
 python -m experiments.texture.run --config experiments/texture/configs/paper.json \
   --images ground1013_small.png --component-counts 10 30 50 \

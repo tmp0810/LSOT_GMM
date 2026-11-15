@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 from threadpoolctl import threadpool_limits
 
+from lsot.devices import resolve_device
 from lsot.gaussians import GMM
 from lsot.projections import PROJECTION_KINDS
 from .data import gaussian_example, grid_nodes, load_gmm, save_gmm
@@ -18,6 +19,7 @@ from .plotting import density_grid, plt, save_gaussian_overlay, save_method_grid
 from .run import fingerprint, read_record, write_json
 from .scaling import evaluate, prepare_data
 from .simple_initialization import PHASES, configurations, fit_initialized, save_case_plots
+from .solver import on_device
 
 
 DEFAULT = PACKAGE/'configs/simple_initialization_grid.json'
@@ -39,6 +41,7 @@ def parse_args(argv=None):
     parser.add_argument('--component-counts', nargs='+', type=int)
     parser.add_argument('--grid-size', type=int)
     parser.add_argument('--repeats', type=int)
+    parser.add_argument('--device', help='cpu, cuda, or cuda:N for min-LSOT optimization')
     parser.add_argument('--steps', type=int, help='Override the optimization budget for all cases')
     parser.add_argument('--output-dir', type=Path)
     parser.add_argument('--no-plots', dest='plots', action='store_false', default=None)
@@ -48,7 +51,7 @@ def parse_args(argv=None):
     if loaded.keys()-defaults.keys():
         parser.error('Unknown configuration keys')
     config = defaults | loaded
-    for key in ('cases', 'methods', 'component_counts', 'grid_size', 'repeats', 'steps', 'output_dir', 'plots'):
+    for key in ('cases', 'methods', 'component_counts', 'grid_size', 'repeats', 'device', 'steps', 'output_dir', 'plots'):
         value = getattr(args, key)
         if value is not None:
             config[key] = str(value) if isinstance(value, Path) else value
@@ -91,6 +94,10 @@ def parse_args(argv=None):
             or type(data['em_steps']) is not int or data['em_steps'] < 1
             or not np.isfinite(data['em_tolerance']) or data['em_tolerance'] <= 0):
         parser.error('Invalid plot, MW2, or data settings')
+    try:
+        config['device'] = str(resolve_device(config['device']))
+    except ValueError as exc:
+        parser.error(str(exc))
     return config
 
 
@@ -103,22 +110,23 @@ def load_inputs(root, case, k, config):
     return [load_gmm(p) for p in paths], 'scaling data preparation'
 
 
-def fit_node(name, inputs, weights, initializers, optimization, mw2):
+def fit_node(name, inputs, weights, initializers, optimization, mw2, *, device='cpu'):
     if len(inputs) == 1:
-        return inputs[0], None, [], dict(status='anchor', total_ms=0., transport_ms=0.)
+        return inputs[0], None, [], dict(status='anchor', total_ms=0., transport_ms=0., runtime_device='cpu')
     if name == 'MW2':
         solved, times = fit_mw2(inputs, mw2, weights)
         times['transport_ms'] = sum(
             times[k] for k in ('tuple_setup_ms', 'gaussian_cost_ms', 'constraint_setup_ms', 'lp_ms'))
         times['mw2_finalize_ms'] = times['total_ms']-times['transport_ms']
         return solved.gmm, None, [], dict(
-            status='ok', num_tuples=int(np.prod([g.count for g in inputs])),
+            status='ok', runtime_device='cpu', num_tuples=int(np.prod([g.count for g in inputs])),
             covariance_iterations=solved.covariance_iterations,
             covariance_tolerance_met=solved.covariance_tolerance_met,
             marginal_error=solved.marginal_error, **times)
     initial, result, history, stats = fit_initialized(
-        inputs, initializers[initializer_name(name)], optimization, weights, kind=MIN_PROJECTIONS.get(name, 'B'))
-    return result, initial, history, stats
+        inputs, initializers[initializer_name(name)], optimization, weights,
+        kind=MIN_PROJECTIONS.get(name, 'B'), device=device)
+    return result, initial, history, dict(runtime_device=device, **stats)
 
 
 def write_tables(root, records):
@@ -140,6 +148,9 @@ def write_tables(root, records):
     grid.columns = [f'grid_{metric}_{stat}' for metric, stat in grid.columns]
     grid['repeats'] = grid_groups.size()
     summary = summary.merge(grid.reset_index(), on=groups)
+    if 'runtime_device' in active:
+        device = active.groupby(groups)['runtime_device'].first().rename('runtime_device')
+        summary = summary.merge(device.reset_index(), on=groups)
     summary['transport_time'] = summary['grid_transport_ms_median']
     mw2_times = summary[summary['name']=='MW2'].set_index(['case', 'K'])['grid_total_ms_mean']
     summary['speedup_vs_mw2'] = [mw2_times.loc[c, k]/t for c,k,t in
@@ -170,6 +181,9 @@ def run_grid(root, case, k, config, settings):
                     size=size, repeats=config['repeats'], density_grid=config['density_grid'],
                     initializers={n: options[initializer_name(n)] for n in methods if n != 'MW2'}, methods=methods,
                     optimization=optimization, mw2=config['mw2'], cpu_threads=1)
+    if config['device'] != 'cpu':
+        manifest.update(device=config['device'], gpu=torch.cuda.get_device_name(config['device']),
+                        torch=str(torch.__version__), cuda=torch.version.cuda)
     key = fingerprint(manifest, SimpleNamespace(inputs=inputs))
     previous = read_record(root/'run_manifest.json')
     if previous and previous['fingerprint'] != key:
@@ -199,7 +213,8 @@ def run_grid(root, case, k, config, settings):
                     cached[name] = record
                     continue
                 print(f'{case} K={k} repeat={repeat+1} {tag} {name}', flush=True)
-                fitted[name] = fit_node(name, gs, omega, options, optimization, config['mw2'])
+                fitted[name] = fit_node(name, gs, omega, options, optimization, config['mw2'],
+                                        device=config['device'])
             if fitted:
                 ref = fitted['MW2'][0] if 'MW2' in fitted else load_gmm(
                     rep/'MW2'/'barycenters'/f'{tag}.npz')
@@ -275,6 +290,8 @@ def main(argv=None):
     with threadpool_limits(1):
         fit_mw2([tiny]*2, dict(gaussian_iterations=2, gaussian_tolerance=0.), [.5, .5])
         warmup_kinds = dict.fromkeys(MIN_PROJECTIONS.get(name, 'B') for name in config['methods'] if name != 'MW2')
+        if warmup_kinds and config['device'] != 'cpu':
+            tiny = on_device(tiny, config['device'])
         for kind in warmup_kinds:
             solve_mixed([tiny]*2, tiny, dict(L=4, steps=1, sampling='fixed', rate=1., mean=1e-6, mass=.01),
                         kind=kind)

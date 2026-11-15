@@ -87,6 +87,13 @@ python -m experiments.barycenter.simple_initialization_grid \
   --output-dir results/simple_initialization_grid_smoke
 ```
 
+Add `--device cuda` to run the four min-LSOT optimizers on a GPU. Data fitting,
+the greedy initializer, the exact multi-marginal MW2 solver and evaluation
+stay on CPU. The total solve time charges the model transfers, and the CUDA
+timers synchronize at their boundaries. `runtime_device` identifies the device
+used for each solve. Use a fresh output directory when changing devices. Use
+CPU for all methods if reporting a comparison on the same device.
+
 The output root is `results/barycenter_min_lsmt_grid/`:
 
 - `metrics.csv`: one row per node and method, including bilinear weights,

@@ -4,6 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 from PIL import Image
+import pytest
 import torch
 from torch.nn.functional import unfold
 
@@ -34,7 +35,9 @@ def test_adsn_convolves_one_noise_field_for_all_rgb_channels():
     np.testing.assert_allclose(adsn(image, 17), expected, atol=1e-14, rtol=0)
 
 
-def test_texture_cli_shares_mixtures_and_saves_feasible_plans(tmp_path):
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA unavailable'))])
+def test_texture_cli_shares_mixtures_and_saves_feasible_plans(tmp_path, device):
     y, x = np.mgrid[:18, :22]
     pixels = np.stack((90 + 55*np.cos(x/2), 100 + 45*np.sin(y/2),
                        130 + 40*np.cos((x+y)/2)), axis=-1).astype(np.uint8)
@@ -45,11 +48,12 @@ def test_texture_cli_shares_mixtures_and_saves_feasible_plans(tmp_path):
     config.write_text(json.dumps(dict(images=[str(img)], component_counts=[2, 3], methods=list(METHODS),
         output_dir=str(output), L=4, max_side=22, fit_patches=180, em_iterations=30,
         sw_samples=64, w_samples=32, eval_directions=12, batch_size=53,
-        timing_repeats=2, download=False, plots=False)))
+        timing_repeats=2, download=False, plots=False, device=device)))
     main(["--config", str(config)])
     rows = pd.read_csv(output/"metrics.csv")
     assert len(rows) == 2*len(METHODS)
     assert set(rows.method) == set(METHODS)
+    assert rows.device.str.startswith(device).all()
     assert len(pd.read_csv(output/"timings.csv")) == 2*len(rows)
     assert len(pd.read_csv(output/"adsn_metrics.csv")) == 1
     assert np.isfinite(rows[["patch_sw2", "patch_w2", "autocov_rmse", "total_ms"]]).all().all()

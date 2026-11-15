@@ -5,6 +5,7 @@
   "grid_size": 7,
   "density_grid": 100,
   "repeats": 1,
+  "device": "cpu",
   "steps": null,
   "optimization": {
     "gaussian": {"sampling": "fixed", "L": 100},

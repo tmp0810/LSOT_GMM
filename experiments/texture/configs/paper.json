@@ -20,6 +20,7 @@
   "eval_directions": 128,
   "batch_size": 4096,
   "timing_repeats": 3,
+  "device": "cpu",
   "threads": 1,
   "download": true,
   "plots": true

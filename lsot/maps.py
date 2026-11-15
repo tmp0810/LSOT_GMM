@@ -48,7 +48,14 @@ class BarycentricMap:
             matrices.index_add_(0, i, conditional[:, None, None] * pair_matrices)
             offsets.index_add_(0, i, conditional[:, None] * pair_offsets)
         cholesky = torch.linalg.cholesky(source.covariances)
-        precision = torch.cholesky_inverse(cholesky)
+        if cholesky.is_cuda:
+            # Use triangular solves instead of the batched cholesky_inverse
+            # kernel, which can be missing on older CUDA cards/wheels.
+            identity = torch.eye(source.dimension, dtype=cholesky.dtype, device=cholesky.device)
+            inverse_root = torch.linalg.solve_triangular(cholesky, identity.expand_as(cholesky), upper=False)
+            precision = inverse_root.transpose(-1, -2) @ inverse_root
+        else:
+            precision = torch.cholesky_inverse(cholesky)
         logdet = 2 * torch.diagonal(cholesky, dim1=-2, dim2=-1).log().sum(-1)
         normalizer = source.weights.log() - 0.5 * (source.dimension * math.log(2 * math.pi) + logdet)
         return cls(source, matrices, offsets, precision, normalizer)

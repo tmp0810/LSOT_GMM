@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from threadpoolctl import threadpool_limits
 
+from lsot.devices import resolve_device, synchronize
 from lsot.projections import sample_projection_bank
 from .data import adsn, extract_patches, load_rgb, save_rgb, texture_path
 from .evaluation import TextureMetrics
@@ -33,6 +34,7 @@ def parse_config(argv=None):
     parser.add_argument("--max-side", type=int)
     parser.add_argument("--fit-patches", type=int, help="Limit per GMM; 0 uses all patches")
     parser.add_argument("--timing-repeats", type=int)
+    parser.add_argument("--device", help="cpu, cuda, or cuda:N")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--no-download", action="store_false", dest="download", default=None)
     parser.add_argument("--no-plots", action="store_false", dest="plots", default=None)
@@ -79,6 +81,7 @@ def parse_config(argv=None):
         for key in ("image_dir", "output_dir"):
             if not isinstance(cfg[key], str) or not cfg[key]:
                 raise ValueError(f"{key} must be a nonempty path")
+        cfg["device"] = str(resolve_device(cfg["device"]))
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     return cfg
@@ -101,7 +104,8 @@ def fit_shared(source, target, k, seed, cfg):
         state = int(np.random.SeedSequence([seed, 10+i]).generate_state(1)[0])
         start = perf_counter()
         model, info = fit_gmm(patches, k, state, iterations=cfg["em_iterations"],
-                              tolerance=cfg["em_tolerance"], regularization=cfg["em_regularization"])
+                              tolerance=cfg["em_tolerance"], regularization=cfg["em_regularization"],
+                              device=cfg["device"])
         info["fit_ms"] = 1000*(perf_counter()-start)
         info["random_state"] = state
         models.append(model)
@@ -111,7 +115,7 @@ def fit_shared(source, target, k, seed, cfg):
 
 def save_mixtures(path, source, target):
     np.savez_compressed(path, **{
-        f"{side}_{attr}": getattr(model, attr).numpy()
+        f"{side}_{attr}": getattr(model, attr).cpu().numpy()
         for side, model in (("source", source), ("target", target))
         for attr in ("weights", "means", "covariances")
     })
@@ -131,6 +135,7 @@ def summarize(root, records, timings, adsn_records):
     summary = groups[fields].agg(["mean", "std"])
     summary.columns = ["_".join(col) for col in summary.columns]
     summary["transport_time"] = summary["plan_ms_mean"]
+    summary["device"] = groups["device"].first()
     summary["runs"] = groups.size()
     summary["em_converged_runs"] = groups["em_converged"].sum()
     summary.reset_index(inplace=True)
@@ -152,6 +157,7 @@ def check_plan_costs(rows):
 
 
 def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
+    device = torch.device(cfg["device"])
     start = perf_counter()
     exemplar, original_shape = load_rgb(path, cfg["max_side"])
     image_load_ms = 1000*(perf_counter()-start)
@@ -169,7 +175,7 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
         target_patches = extract_patches(exemplar, patch_size)
         source_fit = sample_patches(source_patches, cfg["fit_patches"], seed, 1)
         target_fit = sample_patches(target_patches, cfg["fit_patches"], seed, 2)
-        points = torch.from_numpy(source_patches)
+        points = torch.from_numpy(source_patches).to(device)
         patch_ms = 1000*(perf_counter()-tick)
         if min(len(source_fit), len(target_fit)) < max(2, max(cfg["component_counts"])):
             raise ValueError(f"{name} has too few fitting patches for the requested K")
@@ -194,7 +200,8 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
             kind = method.rsplit("-", 1)[1]
             if kind not in banks:
                 tick = perf_counter()
-                bank = sample_projection_bank(points.shape[1], cfg["L"], kind=kind, seed=seed)
+                bank = sample_projection_bank(points.shape[1], cfg["L"], kind=kind, seed=seed, device=device)
+                synchronize(device)
                 banks[kind] = (bank, 1000*(perf_counter()-tick))
 
         for k in cfg["component_counts"]:
@@ -223,7 +230,7 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
                                         bank, cfg["batch_size"])
                     results[m] = result
                     times[m].append(result.timings)
-                    timing_rows.append(dict(image=name, seed=seed, K=k, method=m, repeat=repeat,
+                    timing_rows.append(dict(image=name, seed=seed, K=k, method=m, repeat=repeat, device=str(device),
                                             prepare_ms=prepare_ms, fit_ms=fit_ms, bank_ms=bank_ms,
                                             total_ms=prepare_ms+fit_ms+bank_ms+result.timings["method_ms"],
                                             **result.timings))
@@ -236,7 +243,7 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
                 median = {phase: float(np.median([t[phase] for t in times[m]]))
                           for phase in times[m][0]}
                 quality = eval_image(result.image)
-                row = dict(image=name, seed=seed, K=k, method=m,
+                row = dict(image=name, seed=seed, K=k, method=m, device=str(device),
                            L=None if m == "MW2" else cfg["L"], patch_size=patch_size,
                            patch_dimension=points.shape[1], patches=len(points),
                            source_fit_patches=len(source_fit), target_fit_patches=len(target_fit),
@@ -252,8 +259,8 @@ def run_texture(root, path, origin, cfg, records, timing_rows, adsn_rows):
                 rows[m] = row
                 outputs[m] = result.image
                 save_rgb(folder/f"{m}.png", result.image)
-                np.savez_compressed(folder/f"{m}_plan.npz", rows=result.plan.rows.numpy(),
-                                    cols=result.plan.cols.numpy(), mass=result.plan.mass.numpy(),
+                np.savez_compressed(folder/f"{m}_plan.npz", rows=result.plan.rows.cpu().numpy(),
+                                    cols=result.plan.cols.cpu().numpy(), mass=result.plan.mass.cpu().numpy(),
                                     shape=result.plan.shape)
             check_plan_costs(rows)
             for m, row in rows.items():
@@ -276,6 +283,10 @@ def main(argv=None):
     root = Path(cfg["output_dir"])
     root.mkdir(parents=True, exist_ok=True)
     write_json(root/"settings.json", cfg)
+    device = torch.device(cfg["device"])
+    if device.type == 'cuda':
+        write_json(root/"hardware.json", dict(device=str(device), gpu=torch.cuda.get_device_name(device),
+                                              torch=torch.__version__, cuda=torch.version.cuda))
     records, times, adsn_records = [], [], []
     with threadpool_limits(cfg["threads"]):
         for name in cfg["images"]:

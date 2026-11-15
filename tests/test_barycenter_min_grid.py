@@ -12,13 +12,17 @@ from experiments.barycenter.simple_initialization_grid import main
 from lsot.projections import sample_projection_bank
 
 
-def test_default_grid_uses_all_min_projections(tmp_path):
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA unavailable'))])
+def test_default_grid_uses_all_min_projections(tmp_path, device):
     main(['--cases', 'synthetic', '--component-counts', '4', '--grid-size', '3',
-          '--steps', '12', '--no-plots', '--output-dir', str(tmp_path)])
+          '--steps', '12', '--device', device, '--no-plots', '--output-dir', str(tmp_path)])
     summary = pd.read_csv(tmp_path/'summary.csv')
     kinds = ('Mix', 'SMix', 'B', 'B1D')
     assert set(summary['name']) == {'MW2', *(f'min-LSOT-{kind}' for kind in kinds)}
     assert (summary['grid_total_ms_median'] >= summary['transport_time']).all()
+    assert summary.loc[summary['name'].eq('MW2'), 'runtime_device'].eq('cpu').all()
+    assert summary.loc[summary['name'].ne('MW2'), 'runtime_device'].str.startswith(device).all()
     case = tmp_path/'synthetic'/'K4'
     inputs = [load_gmm(case/'inputs'/f'input_{j}.npz') for j in range(4)]
     initial = None

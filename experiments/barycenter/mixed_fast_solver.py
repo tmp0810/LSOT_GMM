@@ -7,6 +7,7 @@ import time
 import numpy as np
 import torch
 
+from lsot.devices import synchronize
 from lsot.gaussians import GMM
 from lsot.plans import SparsePlan
 from lsot.projections import sample_projection_bank
@@ -144,6 +145,8 @@ def covariance_step(covariance, gradient, rate):
 
 def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
     """Fit min-LSOT, selecting the iterate on an independent same-family bank."""
+    device = initial.weights.device
+    synchronize(device)
     started = time.perf_counter()
     means = torch.nn.Parameter(initial.means.clone())
     logits = torch.nn.Parameter(initial.weights.log().clone())
@@ -153,21 +156,30 @@ def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
         dict(params=[means], lr=cfg['mean']),
     ])
     L = cfg['L']
-    directions = bank(L, 0, kind)
-    validation_bank = bank(512, 1000003, kind)
+
+    def make_bank(count, seed):
+        return sample_projection_bank(initial.dimension, count, kind=kind, seed=seed,
+                                      device=device, dtype=initial.weights.dtype)
+
+    directions = make_bank(L, 0)
+    validation_bank = make_bank(512, 1000003)
     omega = [1/len(inputs)] * len(inputs) if weights is None else weights
     # Cache projections of the fixed input GMMs once per bank. Count that
     # forward transport work, but keep bank sampling in the solver total only.
+    synchronize(device)
     tick = time.perf_counter()
     train = FastObjective(inputs, omega, directions, kind, 'min')
     validation = FastObjective(inputs, omega, validation_bank, kind, 'min')
+    synchronize(device)
     transport_s = time.perf_counter() - tick
     best, state, selected, history = float('inf'), None, 0, []
 
     def transport_objective(objective, gmm):
         nonlocal transport_s
+        synchronize(device)
         tick = time.perf_counter()
         value = objective(gmm)
+        synchronize(device)
         transport_s += time.perf_counter() - tick
         return value
 
@@ -191,10 +203,12 @@ def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
         if cfg['sampling'] == 'partial' and step > 1 and (step - 1) % 10 == 0:
             winners = torch.cat(train.last_winners).unique().tolist()
             keep = list(dict.fromkeys(winners + list(range(L))))[:L - L // 4]
-            directions = join_banks(subset_bank(directions, torch.tensor(keep)),
-                                   bank(L // 4, 10000019 + step, kind))
+            directions = join_banks(subset_bank(directions, torch.tensor(keep, device=device)),
+                                   make_bank(L // 4, 10000019 + step))
+            synchronize(device)
             tick = time.perf_counter()
             train.set_bank(directions)
+            synchronize(device)
             transport_s += time.perf_counter() - tick
         optimizer.zero_grad(set_to_none=True)
         covariance = covariance.detach().requires_grad_(True)
@@ -210,7 +224,9 @@ def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
         covariance = new_cov
         if step % 10 == 0 or step == cfg['steps']:
             checkpoint(step)
-    return GMM(*state), history, dict(
+    result = GMM(*state)
+    synchronize(device)
+    return result, history, dict(
         optimizer_ms=1000 * (time.perf_counter() - started), transport_ms=1000 * transport_s,
         selected_step=selected,
         validation_objective=best, status='max_steps', error='',
