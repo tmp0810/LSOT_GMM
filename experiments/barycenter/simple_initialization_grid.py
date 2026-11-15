@@ -42,6 +42,8 @@ def parse_args(argv=None):
     parser.add_argument('--grid-size', type=int)
     parser.add_argument('--repeats', type=int)
     parser.add_argument('--device', help='cpu, cuda, or cuda:N for min-LSOT optimization')
+    parser.add_argument('--mw2-gaussian-device', help='CPU or CUDA for MW2 tuple geometry (auto follows --device)')
+    parser.add_argument('--mw2-tuple-batch-size', type=int, help='Maximum simultaneous MW2 tuples on CUDA')
     parser.add_argument('--steps', type=int, help='Override the optimization budget for all cases')
     parser.add_argument('--output-dir', type=Path)
     parser.add_argument('--no-plots', dest='plots', action='store_false', default=None)
@@ -51,7 +53,8 @@ def parse_args(argv=None):
     if loaded.keys()-defaults.keys():
         parser.error('Unknown configuration keys')
     config = defaults | loaded
-    for key in ('cases', 'methods', 'component_counts', 'grid_size', 'repeats', 'device', 'steps', 'output_dir', 'plots'):
+    for key in ('cases', 'methods', 'component_counts', 'grid_size', 'repeats', 'device',
+                'mw2_gaussian_device', 'mw2_tuple_batch_size', 'steps', 'output_dir', 'plots'):
         value = getattr(args, key)
         if value is not None:
             config[key] = str(value) if isinstance(value, Path) else value
@@ -67,7 +70,7 @@ def parse_args(argv=None):
         parser.error('Include MW2 to evaluate and compare the grids')
     if any(type(k) is not int or k < 4 for k in config['component_counts']):
         parser.error('Component counts must be integers >= 4')
-    for key, minimum in [('grid_size', 3), ('repeats', 1), ('density_grid', 16)]:
+    for key, minimum in [('grid_size', 3), ('repeats', 1), ('density_grid', 16), ('mw2_tuple_batch_size', 1)]:
         if type(config[key]) is not int or config[key] < minimum:
             parser.error(f'{key} must be an integer >= {minimum}')
     steps = config['steps']
@@ -96,6 +99,9 @@ def parse_args(argv=None):
         parser.error('Invalid plot, MW2, or data settings')
     try:
         config['device'] = str(resolve_device(config['device']))
+        gaussian_device = config['mw2_gaussian_device']
+        config['mw2_gaussian_device'] = (config['device'] if gaussian_device == 'auto'
+                                         else str(resolve_device(gaussian_device)))
     except ValueError as exc:
         parser.error(str(exc))
     return config
@@ -110,16 +116,21 @@ def load_inputs(root, case, k, config):
     return [load_gmm(p) for p in paths], 'scaling data preparation'
 
 
-def fit_node(name, inputs, weights, initializers, optimization, mw2, *, device='cpu'):
+def fit_node(name, inputs, weights, initializers, optimization, mw2, *, device='cpu',
+             mw2_gaussian_device='cpu', mw2_tuple_batch_size=32768):
     if len(inputs) == 1:
         return inputs[0], None, [], dict(status='anchor', total_ms=0., transport_ms=0., runtime_device='cpu')
     if name == 'MW2':
-        solved, times = fit_mw2(inputs, mw2, weights)
+        cuda_costs = mw2_gaussian_device != 'cpu'
+        solved, times = fit_mw2(inputs, mw2, weights, gaussian_device=mw2_gaussian_device if cuda_costs else None,
+                                tuple_batch_size=mw2_tuple_batch_size)
         times['transport_ms'] = sum(
             times[k] for k in ('tuple_setup_ms', 'gaussian_cost_ms', 'constraint_setup_ms', 'lp_ms'))
         times['mw2_finalize_ms'] = times['total_ms']-times['transport_ms']
         return solved.gmm, None, [], dict(
-            status='ok', runtime_device='cpu', num_tuples=int(np.prod([g.count for g in inputs])),
+            status='ok', runtime_device=f'{mw2_gaussian_device}+cpu' if cuda_costs else 'cpu',
+            gaussian_cost_device=mw2_gaussian_device, lp_device='cpu',
+            num_tuples=int(np.prod([g.count for g in inputs])),
             covariance_iterations=solved.covariance_iterations,
             covariance_tolerance_met=solved.covariance_tolerance_met,
             marginal_error=solved.marginal_error, **times)
@@ -148,9 +159,9 @@ def write_tables(root, records):
     grid.columns = [f'grid_{metric}_{stat}' for metric, stat in grid.columns]
     grid['repeats'] = grid_groups.size()
     summary = summary.merge(grid.reset_index(), on=groups)
-    if 'runtime_device' in active:
-        device = active.groupby(groups)['runtime_device'].first().rename('runtime_device')
-        summary = summary.merge(device.reset_index(), on=groups)
+    devices = [name for name in ('runtime_device', 'gaussian_cost_device', 'lp_device') if name in active]
+    if devices:
+        summary = summary.merge(active.groupby(groups)[devices].first().reset_index(), on=groups)
     summary['transport_time'] = summary['grid_transport_ms_median']
     mw2_times = summary[summary['name']=='MW2'].set_index(['case', 'K'])['grid_total_ms_mean']
     summary['speedup_vs_mw2'] = [mw2_times.loc[c, k]/t for c,k,t in
@@ -184,6 +195,11 @@ def run_grid(root, case, k, config, settings):
     if config['device'] != 'cpu':
         manifest.update(device=config['device'], gpu=torch.cuda.get_device_name(config['device']),
                         torch=str(torch.__version__), cuda=torch.version.cuda)
+    if config['mw2_gaussian_device'] != 'cpu':
+        manifest.update(mw2_gaussian_device=config['mw2_gaussian_device'],
+                        mw2_gpu=torch.cuda.get_device_name(config['mw2_gaussian_device']),
+                        mw2_tuple_batch_size=config['mw2_tuple_batch_size'],
+                        torch=str(torch.__version__), cuda=torch.version.cuda)
     key = fingerprint(manifest, SimpleNamespace(inputs=inputs))
     previous = read_record(root/'run_manifest.json')
     if previous and previous['fingerprint'] != key:
@@ -214,7 +230,8 @@ def run_grid(root, case, k, config, settings):
                     continue
                 print(f'{case} K={k} repeat={repeat+1} {tag} {name}', flush=True)
                 fitted[name] = fit_node(name, gs, omega, options, optimization, config['mw2'],
-                                        device=config['device'])
+                                        device=config['device'], mw2_gaussian_device=config['mw2_gaussian_device'],
+                                        mw2_tuple_batch_size=config['mw2_tuple_batch_size'])
             if fitted:
                 ref = fitted['MW2'][0] if 'MW2' in fitted else load_gmm(
                     rep/'MW2'/'barycenters'/f'{tag}.npz')
@@ -288,7 +305,10 @@ def main(argv=None):
     tiny = GMM.from_numpy([1.], [[.5, .5]], [[[.01, 0.], [0., .01]]])
     rows = []
     with threadpool_limits(1):
-        fit_mw2([tiny]*2, dict(gaussian_iterations=2, gaussian_tolerance=0.), [.5, .5])
+        mw2_device = config['mw2_gaussian_device']
+        fit_mw2([tiny]*2, dict(gaussian_iterations=2, gaussian_tolerance=0.), [.5, .5],
+                gaussian_device=mw2_device if mw2_device != 'cpu' else None,
+                tuple_batch_size=config['mw2_tuple_batch_size'])
         warmup_kinds = dict.fromkeys(MIN_PROJECTIONS.get(name, 'B') for name in config['methods'] if name != 'MW2')
         if warmup_kinds and config['device'] != 'cpu':
             tiny = on_device(tiny, config['device'])

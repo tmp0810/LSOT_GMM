@@ -87,12 +87,23 @@ python -m experiments.barycenter.simple_initialization_grid \
   --output-dir results/simple_initialization_grid_smoke
 ```
 
-Add `--device cuda` to run the four min-LSOT optimizers on a GPU. Data fitting,
-the greedy initializer, the exact multi-marginal MW2 solver and evaluation
-stay on CPU. The total solve time charges the model transfers, and the CUDA
-timers synchronize at their boundaries. `runtime_device` identifies the device
-used for each solve. Use a fresh output directory when changing devices. Use
-CPU for all methods if reporting a comparison on the same device.
+Add `--device cuda` to run both the four min-LSOT optimizers and the Gaussian
+tuple step of MW2 on a GPU. In this 2-D grid, that step computes each tuple's
+Gaussian mean, covariance fixed point, and transport cost in float64. It
+enumerates tuples in blocks (`--mw2-tuple-batch-size`, default 32,768), sends
+their costs back to the CPU, and recomputes only the positive-mass tuple
+centers after the LP using the same number of covariance iterations. Each
+block uses the same configured stopping tolerance and maximum iteration
+count as the CPU solver. Data fitting, greedy initialization, the sparse
+constraints, HiGHS LP, and evaluation stay on CPU. The LP still has the full
+Cartesian product of variables, so limiting VRAM does not remove the large
+CPU RAM cost at high K.
+
+The timings include transfers. `gaussian_cost_ms` includes the batched
+geometry and the replay of the selected centers. `gaussian_cost_device`
+and `lp_device` identify the two stages. Use a fresh output directory
+when changing devices. Pass `--mw2-gaussian-device cpu` with `--device cuda`
+to keep MW2 entirely on CPU, or use `--device cpu` for the all-CPU benchmark.
 
 The output root is `results/barycenter_min_lsmt_grid/`:
 

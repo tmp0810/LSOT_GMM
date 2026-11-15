@@ -12,7 +12,9 @@ import numpy as np
 from scipy.optimize import OptimizeWarning, linprog
 from scipy.sparse import coo_matrix
 
+from lsot.devices import synchronize
 from lsot.gaussians import GMM
+from .tuple_costs import BatchedGaussianTuples, tuple_constraints
 
 
 def arrays(gmm):
@@ -90,7 +92,8 @@ class ReferenceResult:
 
 
 def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.,
-                   timings=None, lp_threads=None):
+                   timings=None, lp_threads=None, gaussian_device=None, tuple_batch_size=32768):
+    """Solve the same CPU LP; optionally calculate 2-D Gaussian tuples on CUDA."""
     weights = np.asarray(weights, dtype=float)
     if len(weights) != len(inputs) or np.any(weights < 0) or not np.isclose(weights.sum(), 1):
         raise ValueError("Invalid input weights")
@@ -99,28 +102,41 @@ def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.,
         source = inputs[active[0]]
         w, _, _ = arrays(source)
         return ReferenceResult(source, np.arange(source.count)[:, None], w, np.zeros(source.count), 0., 0.)
+    if iterations < 1:
+        raise ValueError('iterations must be positive')
     phase_started = time.perf_counter()
     selected = [inputs[j] for j in active]
     probabilities, means, covariances = zip(*(arrays(gmm) for gmm in selected))
     shape = tuple(len(p) for p in probabilities)
-    tuples = np.indices(shape).reshape(len(shape), -1).T
-    tuple_means = np.stack([means[j][tuples[:, j]] for j in range(len(shape))], axis=1)
-    tuple_covariances = np.stack([covariances[j][tuples[:, j]] for j in range(len(shape))], axis=1)
+    batched = None
+    if gaussian_device is None:
+        tuples = np.indices(shape).reshape(len(shape), -1).T
+        tuple_means = np.stack([means[j][tuples[:, j]] for j in range(len(shape))], axis=1)
+        tuple_covariances = np.stack([covariances[j][tuples[:, j]] for j in range(len(shape))], axis=1)
+    else:
+        batched = BatchedGaussianTuples(means, covariances, weights[active], gaussian_device, tuple_batch_size)
+        synchronize(batched.device)
     if timings is not None:
         timings["tuple_setup_ms"] = 1000*(time.perf_counter()-phase_started)
     phase_started = time.perf_counter()
-    centers, covs, costs, info = gaussian_barycenters(tuple_means, tuple_covariances,
-                                               weights[active], iterations=iterations,
-                                               fast=fast, tolerance=tolerance, return_info=True)
+    if batched is None:
+        centers, covs, costs, info = gaussian_barycenters(tuple_means, tuple_covariances,
+                                                   weights[active], iterations=iterations,
+                                                   fast=fast, tolerance=tolerance, return_info=True)
+    else:
+        costs, batch_steps, info = batched.costs(iterations, tolerance)
     if timings is not None:
         timings["gaussian_cost_ms"] = 1000*(time.perf_counter()-phase_started)
     phase_started = time.perf_counter()
-    count = len(tuples)
-    offsets = np.cumsum((0,) + shape[:-1])
-    rows = np.concatenate([tuples[:, j]+offsets[j] for j in range(len(shape))])
-    cols = np.tile(np.arange(count), len(shape))
-    constraints = coo_matrix((np.ones(len(rows)), (rows, cols)),
-                             shape=(sum(shape), count)).tocsr()
+    if batched is None:
+        count = len(tuples)
+        offsets = np.cumsum((0,) + shape[:-1])
+        rows = np.concatenate([tuples[:, j]+offsets[j] for j in range(len(shape))])
+        cols = np.tile(np.arange(count), len(shape))
+        constraints = coo_matrix((np.ones(len(rows)), (rows, cols)),
+                                 shape=(sum(shape), count)).tocsr()
+    else:
+        constraints = tuple_constraints(shape, tuple_batch_size)
     rhs = np.concatenate(probabilities)
     if timings is not None:
         timings["constraint_setup_ms"] = 1000*(time.perf_counter()-phase_started)
@@ -142,8 +158,17 @@ def mw2_barycenter(inputs, weights, *, iterations=10, fast=False, tolerance=0.,
     if error > 1e-7:
         raise RuntimeError(f"MW2 multi-marginal marginal error: {error}")
     keep = masses > 0
-    gmm = GMM.from_numpy(masses[keep], centers[keep], covs[keep])
-    return ReferenceResult(gmm, tuples[keep], masses[keep], costs[keep],
+    if batched is None:
+        active_tuples, active_means, active_covs = tuples[keep], centers[keep], covs[keep]
+    else:
+        indices = np.flatnonzero(keep)
+        active_tuples = np.column_stack(np.unravel_index(indices, shape))
+        phase_started = time.perf_counter()
+        active_means, active_covs = batched.active_centers(indices, batch_steps)
+        if timings is not None:
+            timings['gaussian_cost_ms'] += 1000*(time.perf_counter()-phase_started)
+    gmm = GMM.from_numpy(masses[keep], active_means, active_covs)
+    return ReferenceResult(gmm, active_tuples, masses[keep], costs[keep],
                            float(masses @ costs), error, **info)
 
 

@@ -6,6 +6,8 @@
   "density_grid": 100,
   "repeats": 1,
   "device": "cpu",
+  "mw2_gaussian_device": "auto",
+  "mw2_tuple_batch_size": 32768,
   "steps": null,
   "optimization": {
     "gaussian": {"sampling": "fixed", "L": 100},
