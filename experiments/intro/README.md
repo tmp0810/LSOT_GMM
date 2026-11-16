@@ -1,5 +1,21 @@
 # 1D/2D interpolation panels for presentation
 
+## Three-method interpolation figures
+
+To redraw the paper figures from saved results without rerunning the solvers:
+
+```bash
+python -m experiments.intro.presentation --input-dir results/intro --L 100
+```
+
+This saves `1d_interpolation_comparison` and `2d_interpolation_comparison`
+as PNG and PDF. Each has three rows, **W2**, **MW2**, and **min-LSMT-B1D**,
+with a column for each saved time. The W2 row is the regularized discrete
+grid baseline described below. Use `--output-dir` to save elsewhere, and
+match `--L` to the saved run. Older `min-LSOT-B1D_L100` folders work as-is.
+New runs of `experiments.intro.run` also write these two figures automatically
+unless `--skip-grid-w2` is set.
+
 ## Figure 1: transport plans with marginal distributions
 
 This standalone script reproduces the **type of plot** in Figure 1 of the

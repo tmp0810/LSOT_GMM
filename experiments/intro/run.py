@@ -24,7 +24,7 @@ from lsot import (GMM, BarycentricMap, average_lsot, minimum_lsot,
                   optimized_minimum_lsot, solve_mw2)
 from lsot.gaussians import covariance_roots, symmetric_sqrt
 from lsot.projections import PROJECTION_KINDS, sample_projection_bank
-from .presentation import DEFAULT_TIMES, export_sequences, validate_times
+from .presentation import DEFAULT_TIMES, export_paper_comparison, export_sequences, validate_times
 
 
 TIMES_1D = (0.2, 0.5, 0.8)
@@ -283,6 +283,10 @@ def _run_case(case, source, target, args, output):
                   _interpolated_density(source, target, plan, points, t) for t in args.times]
         sequences[name] = np.stack([density / density.sum() for density in values])
     export_sequences(case, x, points, args.times, sequences, output, grid_w2=grid_w2)
+    if grid_w2 is not None:
+        export_paper_comparison(case, x, args.times,
+                                (grid_w2, sequences["MW2"], sequences[f"min-LSOT-B1D_L{args.L}"]),
+                                output)
     return records
 
 

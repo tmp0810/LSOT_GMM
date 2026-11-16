@@ -1,4 +1,5 @@
-"""Individual time panels and MW2-paper-style interpolation strips."""
+"""Export interpolation panels, including the W2/MW2/min-LSMT-B1D grid."""
+import argparse
 from pathlib import Path
 
 import matplotlib
@@ -8,6 +9,7 @@ import numpy as np
 
 
 DEFAULT_TIMES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+PAPER_LABELS = ("W2", "MW2", "min-LSMT-B1D")
 
 
 def time_tag(t):
@@ -44,13 +46,13 @@ def _panel(axis, case, x, values, t, vmax, *, axis_labels=True):
             axis.set_ylabel("y", fontsize=8)
 
 
-def _strip(case, x, times, rows, labels, path, vmax):
+def _strip(case, x, times, rows, labels, path, vmax, *, axis_labels=True):
     figure, axes = plt.subplots(len(rows), len(times),
                                figsize=(2.7 * len(times) + 0.6, 2.8 * len(rows)),
                                squeeze=False)
     for r, (sequence, label) in enumerate(zip(rows, labels)):
         for column, t in enumerate(times):
-            _panel(axes[r, column], case, x, sequence[column], t, vmax)
+            _panel(axes[r, column], case, x, sequence[column], t, vmax, axis_labels=axis_labels)
             if r == 0:
                 axes[r, column].set_title(rf"$t={time_tag(t)}$", fontsize=16, pad=10)
         axes[r, 0].annotate(label, xy=(-0.38, 0.5), xycoords="axes fraction",
@@ -61,6 +63,29 @@ def _strip(case, x, times, rows, labels, path, vmax):
     figure.savefig(path.with_suffix(".png"), dpi=170, bbox_inches="tight")
     figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(figure)
+
+
+def _paper_folders(count):
+    # Keep the historical output folder names so existing runs can be replotted.
+    return ("grid-W2", "MW2", f"min-LSOT-B1D_L{count}")
+
+
+def export_paper_comparison(case, x, times, rows, output):
+    """Draw just the three paper rows, with a shared scale for each dimension."""
+    times = validate_times(times)
+    shape = (len(times), len(x) if case == "1d" else len(x)**2)
+    if len(rows) != len(PAPER_LABELS) or any(
+        values.shape != shape or not np.isfinite(values).all()
+        or np.any(values < 0) or not np.allclose(values.sum(axis=1), 1)
+        for values in rows
+    ):
+        raise ValueError(f"invalid {case} grid probabilities for the paper comparison")
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    path = output / f"{case}_interpolation_comparison"
+    vmax = max(float(values.max()) for values in rows)
+    _strip(case, x, times, rows, PAPER_LABELS, path, vmax, axis_labels=False)
+    print(f"Saved {path}.png and .pdf", flush=True)
 
 
 def export_sequences(case, x, points, times, sequences, output, *, grid_w2=None):
@@ -97,3 +122,34 @@ def export_sequences(case, x, points, times, sequences, output, *, grid_w2=None)
             _strip(case, x, times, [grid_w2, values],
                    ["Grid W2 (regularized)", name], folder / "w2_vs_method", vmax)
         print(f"Saved {case} {name}: {len(times)} time images + strips in {folder}", flush=True)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input-dir", type=Path, default=Path("results/intro"))
+    parser.add_argument("--output-dir", type=Path, help="Defaults to --input-dir")
+    parser.add_argument("--L", type=int, default=100, help="Projection count used for the saved run")
+    args = parser.parse_args(argv)
+    if args.L < 1:
+        parser.error("--L must be positive")
+    for case in ("1d", "2d"):
+        rows = []
+        for folder in _paper_folders(args.L):
+            path = args.input_dir / "methods" / folder / case / "sequence.npz"
+            try:
+                with np.load(path) as data:
+                    if not rows:
+                        x, times = data["x"], data["times"]
+                    elif not (np.array_equal(x, data["x"]) and np.array_equal(times, data["times"])):
+                        parser.error(f"{path} uses a different grid or time list; use one run's results")
+                    rows.append(data["probabilities"])
+            except (OSError, ValueError, KeyError) as error:
+                parser.error(f"cannot read {path}: {error}")
+        try:
+            export_paper_comparison(case, x, times, rows, args.output_dir or args.input_dir)
+        except ValueError as error:
+            parser.error(str(error))
+
+
+if __name__ == "__main__":
+    main()
