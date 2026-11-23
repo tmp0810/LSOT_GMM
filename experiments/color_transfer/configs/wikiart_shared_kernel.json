@@ -3,7 +3,7 @@
   "components_target": 50,
   "projection_counts": [100],
   "projection_kinds": ["Mix", "SMix", "B", "B1D"],
-  "aggregations": ["min"],
+  "aggregations": ["avg"],
   "seeds": [0],
   "projection_seed": 20260909,
   "device": "cpu",
