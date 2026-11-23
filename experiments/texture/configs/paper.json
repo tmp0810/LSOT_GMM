@@ -6,7 +6,7 @@
   "seeds": [0],
   "methods": [
     "MW2",
-    "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"
+    "avg-LSOT-Mix", "avg-LSOT-SMix", "avg-LSOT-B", "avg-LSOT-B1D"
   ],
   "L": 100,
   "patch_size": 3,
