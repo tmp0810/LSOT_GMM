@@ -1,4 +1,4 @@
-"""Bilinear barycenter grids with full MW2 and the four greedy min-LSOT variants."""
+"""Bilinear barycenter grids with full MW2 and greedy min/avg-LSOT variants."""
 import argparse
 import json
 from pathlib import Path
@@ -23,14 +23,15 @@ from .solver import on_device
 
 
 DEFAULT = PACKAGE/'configs/simple_initialization_grid.json'
-MIN_PROJECTIONS = {f'min-LSOT-{kind}': kind for kind in PROJECTION_KINDS}
+LSOT_METHODS = {f'{mode}-LSOT-{kind}': (kind, mode)
+                for mode in ('min', 'avg') for kind in PROJECTION_KINDS}
 GREEDY = 'greedy_mean_spread0.25'
-METHODS = ('MW2', *MIN_PROJECTIONS, 'mixed_fast', GREEDY)
+METHODS = ('MW2', *LSOT_METHODS, 'mixed_fast', GREEDY)
 CASES = ('gaussian', 'synthetic', 'images')
 
 
 def initializer_name(method):
-    return GREEDY if method in MIN_PROJECTIONS else method
+    return GREEDY if method in LSOT_METHODS else method
 
 
 def parse_args(argv=None):
@@ -41,7 +42,7 @@ def parse_args(argv=None):
     parser.add_argument('--component-counts', nargs='+', type=int)
     parser.add_argument('--grid-size', type=int)
     parser.add_argument('--repeats', type=int)
-    parser.add_argument('--device', help='cpu, cuda, or cuda:N for min-LSOT optimization')
+    parser.add_argument('--device', help='cpu, cuda, or cuda:N for min/avg-LSOT optimization')
     parser.add_argument('--mw2-gaussian-device', help='CPU or CUDA for MW2 tuple geometry (auto follows --device)')
     parser.add_argument('--mw2-tuple-batch-size', type=int, help='Maximum simultaneous MW2 tuples on CUDA')
     parser.add_argument('--steps', type=int, help='Override the optimization budget for all cases')
@@ -62,8 +63,10 @@ def parse_args(argv=None):
         values = config[key]
         if not isinstance(values, list) or not values or len(set(values)) != len(values):
             parser.error(f'{key} must be a nonempty list of distinct entries')
-    if set(config['cases'])-set(CASES) or set(config['methods'])-set(METHODS):
-        parser.error('Unknown case or method')
+    for key, choices in (('cases', CASES), ('methods', METHODS)):
+        unknown = set(config[key])-set(choices)
+        if unknown:
+            parser.error(f'Unknown {key}: {", ".join(sorted(unknown))}')
     if 'gaussian' in config['cases'] and 'mixed_fast' in config['methods']:
         parser.error('The Gaussian control requires a greedy initializer, not mixed_fast')
     if 'MW2' not in config['methods']:
@@ -134,9 +137,10 @@ def fit_node(name, inputs, weights, initializers, optimization, mw2, *, device='
             covariance_iterations=solved.covariance_iterations,
             covariance_tolerance_met=solved.covariance_tolerance_met,
             marginal_error=solved.marginal_error, **times)
+    kind, mode = LSOT_METHODS.get(name, ('B', 'min'))
     initial, result, history, stats = fit_initialized(
         inputs, initializers[initializer_name(name)], optimization, weights,
-        kind=MIN_PROJECTIONS.get(name, 'B'), device=device)
+        kind=kind, mode=mode, device=device)
     return result, initial, history, dict(runtime_device=device, **stats)
 
 
@@ -309,12 +313,13 @@ def main(argv=None):
         fit_mw2([tiny]*2, dict(gaussian_iterations=2, gaussian_tolerance=0.), [.5, .5],
                 gaussian_device=mw2_device if mw2_device != 'cpu' else None,
                 tuple_batch_size=config['mw2_tuple_batch_size'])
-        warmup_kinds = dict.fromkeys(MIN_PROJECTIONS.get(name, 'B') for name in config['methods'] if name != 'MW2')
-        if warmup_kinds and config['device'] != 'cpu':
+        warmups = dict.fromkeys(LSOT_METHODS.get(name, ('B', 'min'))
+                                 for name in config['methods'] if name != 'MW2')
+        if warmups and config['device'] != 'cpu':
             tiny = on_device(tiny, config['device'])
-        for kind in warmup_kinds:
+        for kind, mode in warmups:
             solve_mixed([tiny]*2, tiny, dict(L=4, steps=1, sampling='fixed', rate=1., mean=1e-6, mass=.01),
-                        kind=kind)
+                        kind=kind, mode=mode)
         for case in config['cases']:
             for k in (1,) if case == 'gaussian' else config['component_counts']:
                 folder = root/case if case == 'gaussian' else root/case/f'K{k}'

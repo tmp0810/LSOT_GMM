@@ -143,8 +143,8 @@ def covariance_step(covariance, gradient, rate):
     return (result + result.transpose(-1, -2)) / 2
 
 
-def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
-    """Fit min-LSOT, selecting the iterate on an independent same-family bank."""
+def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B', mode='min'):
+    """Fit min/avg-LSOT; validate with the same mode on a fixed independent bank."""
     device = initial.weights.device
     synchronize(device)
     started = time.perf_counter()
@@ -168,8 +168,8 @@ def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
     # forward transport work, but keep bank sampling in the solver total only.
     synchronize(device)
     tick = time.perf_counter()
-    train = FastObjective(inputs, omega, directions, kind, 'min')
-    validation = FastObjective(inputs, omega, validation_bank, kind, 'min')
+    train = FastObjective(inputs, omega, directions, kind, mode)
+    validation = FastObjective(inputs, omega, validation_bank, kind, mode)
     synchronize(device)
     transport_s = time.perf_counter() - tick
     best, state, selected, history = float('inf'), None, 0, []
@@ -201,7 +201,9 @@ def solve_mixed(inputs, initial, cfg, weights=None, *, kind='B'):
     checkpoint(0)
     for step in range(1, cfg['steps'] + 1):
         if cfg['sampling'] == 'partial' and step > 1 and (step - 1) % 10 == 0:
-            winners = torch.cat(train.last_winners).unique().tolist()
+            # Average objectives have no winning slices. Keep the retained
+            # portion in bank order; minimum objectives prioritize winners.
+            winners = torch.cat(train.last_winners).unique().tolist() if train.last_winners else []
             keep = list(dict.fromkeys(winners + list(range(L))))[:L - L // 4]
             directions = join_banks(subset_bank(directions, torch.tensor(keep, device=device)),
                                    make_bank(L // 4, 10000019 + step))

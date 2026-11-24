@@ -248,7 +248,7 @@ def save_case_plots(out, summary, models, *, grid_nodes=None, bounds=(0., 1.)):
     plt.close(fig)
 
 
-def fit_initialized(inputs, cfg, optimization, weights=None, *, kind='B', device='cpu'):
+def fit_initialized(inputs, cfg, optimization, weights=None, *, kind='B', mode='min', device='cpu'):
     tick = time.perf_counter()
     candidate, count = initialize(inputs, cfg, weights)
     initial = pad(candidate.gmm, sum(g.count for g in inputs)-len(inputs)+1, 0)
@@ -256,10 +256,10 @@ def fit_initialized(inputs, cfg, optimization, weights=None, *, kind='B', device
     if torch.device(device).type == 'cuda':
         gpu_inputs = [on_device(gmm, device) for gmm in inputs]
         result, history, stats = solve_mixed(gpu_inputs, on_device(initial, device),
-                                             optimization, weights, kind=kind)
+                                             optimization, weights, kind=kind, mode=mode)
         result = on_device(result, 'cpu')
     else:
-        result, history, stats = solve_mixed(inputs, initial, optimization, weights, kind=kind)
+        result, history, stats = solve_mixed(inputs, initial, optimization, weights, kind=kind, mode=mode)
     return initial, result, history, dict(candidates=count, init_ms=init_ms,
                                          total_ms=(time.perf_counter()-tick)*1000, **stats)
 

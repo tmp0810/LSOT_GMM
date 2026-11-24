@@ -17,6 +17,6 @@
   "mw2": {"gaussian_iterations": 100, "gaussian_tolerance": 1e-8},
   "data": {"synthetic_spread": 0.5, "em_steps": 300, "em_tolerance": 0.001},
   "plots": true,
-  "output_dir": "results/barycenter_min_lsmt_grid"
+  "output_dir": "results/barycenter_avg_lsmt_grid"
 }
 

@@ -47,24 +47,30 @@ The grid config runs **synthetic and images**, at **K=10, 30, 50, 100**
 components per input GMM and data seed 0. K=30 reuses the bundled input
 fits; other counts use the scaling experiment's synthetic refinement or
 image EM fitting. No download is needed. The five default methods are
-MW2 and min-LSOT-Mix, min-LSOT-SMix, min-LSOT-B, and min-LSOT-B1D.
-Use `--methods MW2 min-LSOT-B` to run a subset.
+MW2 and avg-LSOT-Mix, avg-LSOT-SMix, avg-LSOT-B, and avg-LSOT-B1D.
+Both `avg-LSOT-*` and `min-LSOT-*` are supported in the JSON config and
+`--methods`. Use `--methods MW2 avg-LSOT-B` to run a subset. To rerun the
+minimum variants, pass all four `min-LSOT-*` names and a separate
+`--output-dir results/barycenter_min_lsmt_grid`.
 
 Columns vary x, rows vary y; the node weights are
 `[(1-x)(1-y), x(1-y), (1-x)y, xy]`. Corner nodes copy the corresponding
 input, edges fit two inputs, and interior nodes fit four. The weighted
 initializer normalizes weights within each group for its Gaussian
 representative, and uses the original node weights at the final merge.
-All methods use the same inputs and node weights. The four min-LSOT
+All methods use the same inputs and node weights. The four LSOT
 methods start from the same deterministic greedy GMM and each charges
 initialization to its solve time. The variational component budget is
 the sum of the active input counts minus the number of active inputs
 plus one. The main config uses partial direction refresh
-for both grid cases (25% replaced every 10 steps, retaining the winning directions).
+for both grid cases (25% replaced every 10 steps). Minimum objectives retain
+winning directions first; average objectives retain the first 75% of the
+current bank, since every slice contributes and there is no winning slice.
 Both use 100 training directions; images uses 100 steps and synthetic uses
 200 steps when `steps` is null. Both use the same covariance update as the center
 experiment. Each variant chooses a checkpoint on a fixed 512-direction
-validation bank of its own projection family. `final_mw2_mean` is the
+validation bank of its own projection family, using the same `avg` or `min`
+objective as training. `final_mw2_mean` is the
 common MW2 objective for comparing quality across the variants.
 The per-case `optimization` entries override the inherited training bank
 size and sampling mode. These settings were selected from the K=30 center
@@ -87,7 +93,7 @@ python -m experiments.barycenter.simple_initialization_grid \
   --output-dir results/simple_initialization_grid_smoke
 ```
 
-Add `--device cuda` to run both the four min-LSOT optimizers and the Gaussian
+Add `--device cuda` to run both the four LSOT optimizers and the Gaussian
 tuple step of MW2 on a GPU. In this 2-D grid, that step computes each tuple's
 Gaussian mean, covariance fixed point, and transport cost in float64. It
 enumerates tuples in blocks (`--mw2-tuple-batch-size`, default 32,768), sends
@@ -105,7 +111,7 @@ and `lp_device` identify the two stages. Use a fresh output directory
 when changing devices. Pass `--mw2-gaussian-device cpu` with `--device cuda`
 to keep MW2 entirely on CPU, or use `--device cpu` for the all-CPU benchmark.
 
-The output root is `results/barycenter_min_lsmt_grid/`:
+The default output root is `results/barycenter_avg_lsmt_grid/`:
 
 - `metrics.csv`: one row per node and method, including bilinear weights,
   measured solve phases, `transport_ms`, MW2 objective, and independent
@@ -131,7 +137,7 @@ multiple repeats, the displayed grids are from the last repeat.
 
 `transport_ms` is a breakdown of the solver time. For MW2 it covers tuple
 enumeration, Gaussian tuple costs, LP constraint setup, and the LP solve.
-For min-LSOT it covers cached input projections and all forward plan
+For min/avg-LSOT it covers cached input projections and all forward plan
 construction and scoring during training and checkpoint evaluation. It
 excludes initializer construction, direction sampling, backpropagation,
 parameter updates and final GMM construction, which remain in the full
