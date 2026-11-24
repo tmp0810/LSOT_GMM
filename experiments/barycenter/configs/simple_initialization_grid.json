@@ -1,7 +1,7 @@
 {
   "cases": ["synthetic", "images"],
   "component_counts": [10, 30, 50, 100],
-  "methods": ["MW2", "min-LSOT-Mix", "min-LSOT-SMix", "min-LSOT-B", "min-LSOT-B1D"],
+  "methods": ["MW2", "avg-LSOT-Mix", "avg-LSOT-SMix", "avg-LSOT-B", "avg-LSOT-B1D"],
   "grid_size": 7,
   "density_grid": 100,
   "repeats": 1,
